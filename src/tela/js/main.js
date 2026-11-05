@@ -175,6 +175,7 @@ async function retomar(s) {
     if (palco.cartoes.has(info.id)) palco.atualizar(info);
     else palco.adicionar(info);
     setTimeout(() => palco.focar(info.id), 150);
+    if (info.conversa_nova) avisar({ texto: `${info.nome} não tinha conversa gravada para retomar, então começou uma nova.`, cor: "#ffc857", tempo: 7000 });
     if (gaveta.aba === "time" && gaveta.aberta) gaveta.time();
   } catch (e) {
     avisar({ texto: `Não retomou: ${e.message}`, cor: "#ff6b7d", tempo: 7000 });

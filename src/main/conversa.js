@@ -25,6 +25,21 @@ function achar(sessao) {
   return null;
 }
 
+/** A pasta em que a conversa rodou: o Claude grava "cwd" nas linhas e só a retoma dessa mesma pasta. */
+function pastaDe(caminho) {
+  try {
+    const fd = fs.openSync(caminho, 'r');
+    const buf = Buffer.alloc(256 * 1024);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    for (const linha of buf.subarray(0, n).toString('utf8').split('\n')) {
+      if (!linha.includes('"cwd"')) continue;
+      try { const d = JSON.parse(linha); if (d.cwd) return d.cwd; } catch { /* linha cortada no fim do bloco */ }
+    }
+  } catch { /* sem acesso */ }
+  return null;
+}
+
 function ler(caminho, desde = 0, ultimos = null) {
   let dados;
   try {
@@ -100,4 +115,4 @@ function resumoEntrada(e) {
   return '';
 }
 
-module.exports = { achar, ler, textoUsuario, resumoEntrada };
+module.exports = { achar, pastaDe, ler, textoUsuario, resumoEntrada };

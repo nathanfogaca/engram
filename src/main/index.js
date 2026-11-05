@@ -10,7 +10,7 @@ if (process.env.ENGRAM_DADOS) app.setPath('userData', path.resolve(process.env.E
 
 const config = require('./config');
 const banco = require('./banco');
-const { criarFonte } = require('./fontes');
+const { criarFonte, FontePasta } = require('./fontes');
 const { Cerebro } = require('./cerebro');
 const { Janelas } = require('./janelas');
 const { criarServidorLocal } = require('./servidor-local');
@@ -44,12 +44,18 @@ async function iniciarNucleo() {
   fs.mkdirSync(c.dados, { recursive: true });
   const token = config.tokenLocal();
   const db = banco.abrir(c.banco);
-  const fonte = criarFonte(cfg);
-  try { fonte.preparar(); } catch (e) { config.registrar(`cérebro: ${e.message}`); }
-  const cerebro = new Cerebro(cfg, db, c.banco, fonte);
   const cofre = new Cofre({ dados: c.dados, safeStorage });
   const provedores = new Provedores({ cfg, cofre, salvarConfig: config.salvar, registrar: config.registrar });
   const mcps = new Mcps({ dados: c.dados, cofre, cfg, provedores, registrar: config.registrar });
+  // cérebro remoto: os agentes o enxergam pelo nome do MCP cadastrado com o mesmo endereço
+  if (cfg.cerebro.fonte === 'remoto') { const m = mcps.porUrl(cfg.cerebro.url); if (m) cfg.cerebro.servidor = m.id; }
+  let fonte;
+  try { fonte = criarFonte(cfg); } catch (e) {
+    config.registrar(`cérebro remoto não abriu (${e.message}); usando a pasta neste computador`);
+    fonte = new FontePasta(cfg.cerebro.pasta);
+  }
+  try { fonte.preparar(); } catch (e) { config.registrar(`cérebro: ${e.message}`); }
+  const cerebro = new Cerebro(cfg, db, c.banco, fonte);
   const skills = new Skills({ dados: c.dados, registrar: config.registrar });
   skills.sincronizar(); // plugin do Claude e pastas do Engram no Codex, conforme a biblioteca
   const janelas = new Janelas({ cfg, cerebro, fonte, token, caminhos: c, avisar, provedores, mcps, skills });

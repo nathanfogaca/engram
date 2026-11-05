@@ -51,6 +51,13 @@ class Mcps {
 
   achar(id) { return this.estado.servidores.find(s => s.id === id) || null; }
 
+  /** O MCP cadastrado que aponta para este endereço (é com o nome dele que os agentes o enxergam). */
+  porUrl(url) {
+    const normal = u => { try { const x = new URL(u); return `${x.protocol}//${x.host}${x.pathname.replace(/\/+$/, '')}`; } catch { return ''; } };
+    const alvo = normal(url);
+    return alvo ? this.estado.servidores.find(s => s.tipo !== 'stdio' && normal(s.url) === alvo) || null : null;
+  }
+
   /**
    * Cria ou atualiza. `def.headers`/`def.env`: { nome: valor | { cofre: true } (mantém) }.
    * `segredos`: { "headers.Authorization": "valor" } vão para o cofre.

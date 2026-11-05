@@ -173,7 +173,7 @@ class Cerebro {
   sessaoCriar(id, nome, provedor, modelo, papel, pasta) {
     this.q(`INSERT INTO sessoes (id, nome, provedor, modelo, papel, pasta, criada, encerrada, estado, manter)
             VALUES (?,?,?,?,?,?,?,NULL,'iniciando',1)
-            ON CONFLICT(id) DO UPDATE SET encerrada = NULL, estado = 'iniciando', manter = 1, modelo = excluded.modelo, nome = excluded.nome, provedor = excluded.provedor`)
+            ON CONFLICT(id) DO UPDATE SET encerrada = NULL, estado = 'iniciando', manter = 1, modelo = excluded.modelo, nome = excluded.nome, provedor = excluded.provedor, pasta = excluded.pasta`)
       .run(id, nome, provedor, modelo, papel, pasta, agora());
   }
   sessaoMcps(id, lista) { this.q('UPDATE sessoes SET mcps = ? WHERE id = ?').run(lista ? JSON.stringify(lista) : null, id); }

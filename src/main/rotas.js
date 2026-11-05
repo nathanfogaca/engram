@@ -169,10 +169,16 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
 
   // ---------------------------------------------------------------- geral, tema e primeiro uso
   const CAMPOS_GERAIS = ['pasta_trabalho', 'max_janelas', 'max_mensagens_par_10min', 'max_arquivo_mb', 'contexto', 'atualizar_sozinho', 'padrao_agente', 'padrao_modelo'];
+  // cérebro salvo que só vale depois de reiniciar (a tela mostra o salvo, não o que está em uso)
+  let cerebroPendente = null;
+  const chaveCerebro = x => (x.fonte === 'remoto'
+    ? JSON.stringify(['remoto', x.url || '', x.token_env || '', x.ca || '', x.pasta_remota || 'cerebro', x.servidor || 'cerebro'])
+    : JSON.stringify(['pasta', x.pasta || caminhos.cerebro]));
   rota('GET', '/api/config', () => ({
     ...Object.fromEntries(CAMPOS_GERAIS.map(k => [k, cfg[k] ?? null])),
     atualizar_sozinho: cfg.atualizar_sozinho !== false,
-    cerebro: { ...cfg.cerebro }, cerebro_fonte_ativa: cerebro.fonte.tipo, dados: caminhos.dados, versao,
+    cerebro: { ...(cerebroPendente || cfg.cerebro) }, cerebro_pendente: !!cerebroPendente,
+    cerebro_fonte_ativa: cerebro.fonte.tipo, dados: caminhos.dados, versao,
   }));
   rota('POST', '/api/config', erro400(async (_, b) => {
     const fs = require('node:fs');
@@ -201,14 +207,20 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
       const novo = c.fonte === 'remoto'
         ? { fonte: 'remoto', url: String(c.url || '').trim(), token_env: String(c.token_env || '').trim(), ca: String(c.ca || '').trim(), pasta_remota: String(c.pasta_remota || 'cerebro').trim(), servidor: String(c.servidor || 'cerebro').trim(), sincronizar_min: cfg.cerebro.sincronizar_min }
         : { fonte: 'pasta', pasta: String(c.pasta || '').trim(), sincronizar_min: cfg.cerebro.sincronizar_min };
-      if (novo.fonte === 'remoto') exigir(/^https?:\/\//.test(novo.url), 400, 'o endereço do cérebro remoto tem de começar com http:// ou https://');
+      if (novo.fonte === 'remoto') {
+        exigir(/^https?:\/\//.test(novo.url), 400, 'o endereço do cérebro remoto tem de começar com http:// ou https://');
+        exigir(!novo.ca || fs.existsSync(novo.ca), 400, 'o arquivo do certificado (CA) não existe');
+        const m = mcps.porUrl(novo.url); // o nome com que os agentes enxergam o servidor é o do cadastro em MCPs
+        if (m) novo.servidor = m.id;
+      }
       if (novo.fonte === 'pasta' && novo.pasta) { fs.mkdirSync(novo.pasta, { recursive: true }); }
-      reiniciar = JSON.stringify(novo) !== JSON.stringify({ ...cfg.cerebro, ...novo }) || novo.fonte !== cfg.cerebro.fonte || (novo.pasta || '') !== (cfg.cerebro.pasta || '') || (novo.url || '') !== (cfg.cerebro.url || '');
+      reiniciar = chaveCerebro(novo) !== chaveCerebro(cfg.cerebro);
+      cerebroPendente = reiniciar ? novo : null;
       parcial.cerebro = novo;
     }
     salvarConfig(parcial);
     for (const [k, v] of Object.entries(parcial)) if (k !== 'cerebro') cfg[k] = v;
-    return { ok: true, reiniciar };
+    return { ok: true, reiniciar, cerebro: parcial.cerebro || null };
   }));
   rota('POST', '/api/tema', erro400((_, b) => {
     exigir(require('./config').TEMAS[b.tema], 400, 'tema desconhecido');

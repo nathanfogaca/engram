@@ -118,8 +118,8 @@ class Janelas {
     }
     for (const s of retomar) {
       try {
-        await this.abrir({ nome: s.nome, modelo: s.modelo, papel: s.papel, provedor: s.provedor || 'claude', retomar: s.id });
-        this.avisar({ tipo: 'aviso', texto: `${s.nome} foi reaberto onde parou` });
+        const r = await this.abrir({ nome: s.nome, modelo: s.modelo, papel: s.papel, provedor: s.provedor || 'claude', retomar: s.id });
+        this.avisar({ tipo: 'aviso', texto: r.conversa_nova ? `${s.nome} foi reaberto (não tinha conversa gravada, então começou uma nova)` : `${s.nome} foi reaberto onde parou` });
       } catch (e) {
         this.cerebro.sessaoEncerrar(s.id);
         this.avisar({ tipo: 'aviso', texto: `não deu para reabrir ${s.nome}: ${e.message}` });
@@ -199,6 +199,18 @@ class Janelas {
     for (let base = nome, n = 2; nomes.has(nome.toLowerCase()); n++) nome = `${base} ${n}`;
     const id = retomar || crypto.randomUUID();
     const pastaArquivos = this.arquivos.pasta(id);
+    // Retomar volta na pasta em que a conversa começou (o Claude só acha a conversa a partir dela). Agente
+    // que nunca recebeu mensagem não tem conversa gravada: aí começa uma nova, com o mesmo id e no mesmo lugar.
+    let cwd = this.cfg.pasta_trabalho;
+    let continuar = !!retomar;
+    if (retomar) {
+      const s = this.cerebro.sessao(retomar);
+      const arq = provedor === 'claude' ? conversa.achar(retomar) : null;
+      const onde = (arq && conversa.pastaDe(arq)) || s.pasta;
+      if (onde && fs.existsSync(onde)) cwd = onde;
+      if (provedor === 'claude') { if (!arq || cwd !== onde) continuar = false; }
+      else if (!(provedor === 'codex' && s.externo)) continuar = false; // só o Codex (com o id dele) também retoma
+    }
 
     let prompt = this.cfg.prompt_base.replaceAll('{nome}', nome).replaceAll('{pasta}', pastaArquivos)
       .replaceAll('{cerebro}', this.fonte.descricao()).replaceAll('{contexto}', this.cfg.contexto ? `\n${this.cfg.contexto}\n` : '');
@@ -211,7 +223,7 @@ class Janelas {
     let escolhidos = mcps === undefined ? (anterior?.mcps ? JSON.parse(anterior.mcps) : null) : Array.isArray(mcps) ? mcps.map(String) : null;
     const listaMcps = this.mcps ? await this.mcps.paraJanela(provedor, escolhidos) : [];
     const montado = adaptador.montar({
-      id, nome, modelo, prompt, arqPrompt, retomar: !!retomar, externo: anterior?.externo || null,
+      id, nome, modelo, prompt, arqPrompt, retomar: continuar, externo: anterior?.externo || null,
       pastas: [pastaArquivos, ...(this.fonte.tipo === 'pasta' ? [this.fonte.pasta] : [])],
       mcpUrl: `http://127.0.0.1:${this.cfg.porta}/mcp`, token: this.token, dirJanelas: this.caminhos.janelas,
       arquivoGanchos: this.arquivoGanchos, runtime: this.motor.runtime, chave: await this.provedores.chaveParaJanela(provedor),
@@ -224,17 +236,18 @@ class Janelas {
     env.NO_PROXY = [...new Set([...semProxy, '127.0.0.1', 'localhost'])].join(',');
     Object.assign(env, montado.env, { ENGRAM_URL: `http://127.0.0.1:${this.cfg.porta}`, ENGRAM_TOKEN: this.token, ENGRAM_SESSAO: id });
 
-    await this.motor.pedir('abrir', { id, argv, cwd: this.cfg.pasta_trabalho, env, linhas: 28, colunas: 100 });
+    await this.motor.pedir('abrir', { id, argv, cwd, env, linhas: 28, colunas: 100 });
     const j = new Janela(id, this.motor, provedor);
     j.arquivosAssinatura = this.arquivos.assinatura(id);
     this.ativas.set(id, j);
-    this.cerebro.sessaoCriar(id, nome, provedor, modelo, papel, this.cfg.pasta_trabalho);
+    this.cerebro.sessaoCriar(id, nome, provedor, modelo, papel, cwd);
     if (mcps !== undefined) this.cerebro.sessaoMcps(id, escolhidos);
     if (posicao) this.cerebro.posicaoSalvar(id, ...posicaoValida(posicao));
     else if (!this.cerebro.posicao(id)) this.cerebro.posicaoSalvar(id, ...this.lugarLivre(ligarA));
     if (ligarA && this.ativas.has(ligarA) && this.cerebro.conectar(ligarA, id)) this.avisar({ tipo: 'conexao', acao: 'criada', a: ligarA, b: id });
     if (tarefa) this.enfileirar(j, tarefa[0], tarefa[1]);
     const info = this.info(id);
+    if (retomar && !continuar) info.conversa_nova = true;
     this.avisar({ tipo: 'sessao', sessao: info });
     return info;
   }

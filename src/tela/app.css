@@ -1134,3 +1134,7 @@ textarea#sql:focus { border-color: rgb(var(--acento1) / .6); box-shadow: 0 0 0 4
 .aj-barra-progresso { height: 6px; border-radius: 999px; background: rgb(var(--tinta) / .08); overflow: hidden; }
 .aj-barra-progresso i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--violeta), var(--ciano)); box-shadow: 0 0 12px var(--ciano); transition: width .4s var(--suave); }
 .atualizacao.erro { color: #ffc2ca; border-color: rgb(255 107 125 / .45); background: rgb(255 107 125 / .1); }
+
+/* cérebro salvo esperando o app reiniciar */
+.aj-pendente { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px; background: rgb(255 200 87 / .1); border: 1px solid rgb(255 200 87 / .4); color: var(--texto); font-size: 13.5px; }
+.aj-pendente span { flex: 1 1 260px; }

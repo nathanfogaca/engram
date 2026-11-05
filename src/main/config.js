@@ -102,6 +102,8 @@ function carregar() {
   // o Bloco de Notas e o PowerShell 5.1 gravam um BOM no início, e o JSON.parse não aceita
   try { salvo = JSON.parse(fs.readFileSync(c.config, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { if (e.code !== 'ENOENT') registrar(`config.json ilegível: ${e.message}`); }
   const cfg = { ...PADRAO, ...salvo, cerebro: { ...PADRAO.cerebro, ...(salvo.cerebro || {}) } };
+  // configurações de versões antigas usavam outro nome para a fonte remota: o que tem endereço é remoto
+  if (cfg.cerebro.fonte !== 'pasta' && cfg.cerebro.fonte !== 'remoto') cfg.cerebro.fonte = cfg.cerebro.url ? 'remoto' : 'pasta';
   if (process.env.ENGRAM_PORTA) cfg.porta = Number(process.env.ENGRAM_PORTA);
   if (!cfg.motor_porta) cfg.motor_porta = cfg.porta + 9;
   if (!cfg.pasta_trabalho) cfg.pasta_trabalho = app.getPath('home');

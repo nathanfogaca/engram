@@ -96,7 +96,7 @@ export class PainelGeral {
     const campo = (rotulo, entrada, dica) => el("label", { class: "aj-campo" }, el("span", { text: rotulo }), entrada, dica ? el("small", { class: "aj-dica", text: dica }) : null);
     const pasta = el("input", { value: c.pasta_trabalho || "", spellcheck: "false" });
     const escolher = (alvo, titulo) => el("button", { type: "button", class: "btn pequeno", onclick: async () => { const r = await api("/api/escolher-pasta", { json: { titulo } }); if (r.caminho) alvo.value = r.caminho; } }, "Escolher…");
-    let fonte = c.cerebro.fonte || "pasta";
+    let fonte = c.cerebro.fonte === "remoto" ? "remoto" : "pasta";
     const cerPasta = el("input", { value: c.cerebro.pasta || "", spellcheck: "false" });
     const cerUrl = el("input", { value: c.cerebro.url || "", placeholder: "https://servidor:8765/mcp", spellcheck: "false" });
     const cerToken = el("input", { value: c.cerebro.token_env || "", placeholder: "ex.: CEREBRO_TOKEN", spellcheck: "false" });
@@ -107,7 +107,7 @@ export class PainelGeral {
     const blocoRemoto = el("div", { class: "aj-campos" },
       campo("Endereço do MCP", cerUrl), campo("Variável com o token", cerToken, "O token fica na variável de ambiente, não no Engram."),
       campo("Certificado (CA)", cerCa), campo("Pasta no servidor", cerRemota),
-      campo("Nome do MCP nos agentes", cerServidor, "Cadastre o mesmo servidor em MCPs para os agentes lerem e gravarem as notas."));
+      campo("Nome do MCP nos agentes", cerServidor, "Cadastre o mesmo servidor em MCPs para os agentes lerem e gravarem as notas. Com ele cadastrado, o Engram usa o nome de lá sozinho."));
     const seg = el("div", { class: "aj-seg" });
     const desenharFonte = () => {
       seg.replaceChildren(...[["pasta", "Pasta neste computador"], ["remoto", "Servidor remoto (avançado)"]].map(([f, r]) =>
@@ -129,10 +129,8 @@ export class PainelGeral {
       };
       try {
         const r = await api("/api/config", { json: corpo });
-        if (r.reiniciar) {
-          avisar({ texto: "Salvo. O cérebro muda quando o Engram reiniciar (os agentes continuam rodando).", cor: "#ffc857", tempo: 8000 });
-          this.raiz.querySelector(".aj-reiniciar").hidden = false;
-        } else avisar({ texto: "Ajustes salvos", cor: "#4ade9f" });
+        if (r.reiniciar) avisar({ texto: "Salvo. O cérebro novo entra quando o Engram reiniciar (os agentes continuam rodando).", cor: "#ffc857", tempo: 8000 });
+        else avisar({ texto: "Ajustes salvos", cor: "#4ade9f" });
         await this.carregar();
       } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d", tempo: 7000 }); }
     };
@@ -141,7 +139,10 @@ export class PainelGeral {
         el("div", { class: "aj-campo" }, el("span", { text: "Pasta de trabalho" }), el("div", { class: "linha" }, pasta, escolher(pasta, "Pasta de trabalho dos agentes")),
           el("small", { class: "aj-dica", text: "É onde cada janela nova abre. Janelas já abertas continuam onde estão." }))),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Cérebro" }), seg, blocoPasta, blocoRemoto,
-        el("small", { class: "aj-dica", text: `O normal é a pasta neste computador. O servidor remoto é para quem já tem as notas num servidor próprio, com as ferramentas arquivos_listar e arquivos_ler. Em uso agora: ${c.cerebro_fonte_ativa === "remoto" ? "servidor remoto" : "pasta neste computador"}. Trocar a fonte vale depois de reiniciar o Engram.` })),
+        c.cerebro_pendente ? el("div", { class: "aj-pendente" },
+          el("span", { text: "Salvo. Falta reiniciar o Engram para o cérebro novo entrar (os agentes continuam rodando)." }),
+          el("button", { type: "button", class: "btn-brilho pequeno", onclick: () => this.aoReiniciar?.() }, el("span", { text: "Reiniciar agora" }))) : null,
+        el("small", { class: "aj-dica", text: `O normal é a pasta neste computador. O servidor remoto é para quem já tem as notas num servidor próprio, com as ferramentas arquivos_listar e arquivos_ler. Em uso agora: ${c.cerebro_fonte_ativa === "remoto" ? "servidor remoto" : "pasta neste computador"}.` })),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Limites" }),
         el("div", { class: "aj-campos tres" }, campo("Janelas abertas ao mesmo tempo", maxJ), campo("Mensagens entre dois agentes a cada 10 min", maxM, "Trava contra dois agentes respondendo um ao outro em loop."), campo("Tamanho máximo de arquivo (MB)", maxA))),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Contexto para todos os agentes" }), el("div", { class: "aj-campo" }, contexto)),
@@ -150,7 +151,6 @@ export class PainelGeral {
           el("span", {}, "Instalar atualizações sozinho ", el("small", { text: "(quando a janela não está em uso)" })))),
       el("div", { class: "aj-acoes rodape-geral" },
         el("small", { class: "aj-nota", text: `Dados do Engram: ${c.dados}` }), el("span", { class: "empurra" }),
-        el("button", { type: "button", class: "btn pequeno aj-reiniciar", hidden: true, onclick: () => this.aoReiniciar?.() }, "Reiniciar agora"),
         el("button", { type: "button", class: "btn-brilho pequeno", onclick: salvar }, el("span", { text: "Salvar" }))));
   }
 }
