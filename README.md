@@ -52,13 +52,3 @@ Um maestro divide o trabalho, cada um usa o modelo certo, e o que eles aprendem 
 3. Na primeira vez, um guia leva você pelo tema, pelas contas e pelo agente padrão, e abre o primeiro time.
 
 **Requisitos:** Windows 10 ou 11 (64 bits) e pelo menos um agente com conta: [Claude Code](https://claude.com/claude-code) ou [Codex](https://developers.openai.com/codex).
-
-## Para desenvolver
-
-```powershell
-npm install
-npm start            # roda em modo de desenvolvimento
-npm run dist         # gera dist\Engram-windows-x64.exe
-```
-
-Arquitetura, decisões e o passo a passo de lançamento estão no [LEIAME.md](LEIAME.md).
