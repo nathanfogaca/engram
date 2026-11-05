@@ -1,0 +1,231 @@
+// Engram: processo principal do app (Electron).
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { app, BrowserWindow, ipcMain, protocol, net, shell, Tray, Menu, nativeImage, safeStorage, dialog } = require('electron');
+
+// Cópia de teste com dados próprios (não mexe no Engram de todo dia)
+if (process.env.ENGRAM_DADOS) app.setPath('userData', path.resolve(process.env.ENGRAM_DADOS));
+
+const config = require('./config');
+const banco = require('./banco');
+const { criarFonte } = require('./fontes');
+const { Cerebro } = require('./cerebro');
+const { Janelas } = require('./janelas');
+const { criarServidorLocal } = require('./servidor-local');
+const mcp = require('./mcp-time');
+const { criarRotas } = require('./rotas');
+const { Arquivos } = require('./arquivos');
+const { Atualizador } = require('./atualizacao');
+const { Cofre } = require('./cofre');
+const { Provedores } = require('./provedores');
+const { Mcps } = require('./mcps');
+const { Skills } = require('./skills');
+
+const TELA = path.resolve(__dirname, '..', 'tela');
+const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
+const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' engram: data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'";
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'engram', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
+
+if (!app.requestSingleInstanceLock()) app.quit();
+
+let janela = null;
+let nucleo = null;
+
+function avisar(msg) {
+  if (janela && !janela.isDestroyed()) janela.webContents.send('aovivo', msg);
+}
+
+async function iniciarNucleo() {
+  const cfg = config.carregar();
+  const c = config.caminhos();
+  fs.mkdirSync(c.dados, { recursive: true });
+  const token = config.tokenLocal();
+  const db = banco.abrir(c.banco);
+  const fonte = criarFonte(cfg);
+  try { fonte.preparar(); } catch (e) { config.registrar(`cérebro: ${e.message}`); }
+  const cerebro = new Cerebro(cfg, db, c.banco, fonte);
+  const cofre = new Cofre({ dados: c.dados, safeStorage });
+  const provedores = new Provedores({ cfg, cofre, salvarConfig: config.salvar, registrar: config.registrar });
+  const mcps = new Mcps({ dados: c.dados, cofre, cfg, provedores, registrar: config.registrar });
+  const skills = new Skills({ dados: c.dados, registrar: config.registrar });
+  skills.sincronizar(); // plugin do Claude e pastas do Engram no Codex, conforme a biblioteca
+  const janelas = new Janelas({ cfg, cerebro, fonte, token, caminhos: c, avisar, provedores, mcps, skills });
+  const estadoSinc = { rodando: false, ultimo: null, erro: null };
+
+  async function sincronizar(forcar = false) {
+    estadoSinc.rodando = true;
+    avisar({ tipo: 'sinc', rodando: true });
+    let resultado;
+    try {
+      resultado = await cerebro.sincronizar(forcar);
+      Object.assign(estadoSinc, { ultimo: resultado, erro: null });
+    } catch (e) {
+      estadoSinc.erro = e.message;
+      resultado = { erro: e.message };
+    }
+    estadoSinc.rodando = false;
+    avisar({ tipo: 'sinc', rodando: false, resultado });
+    return resultado;
+  }
+
+  try {
+    await criarServidorLocal({ cfg, token, janelas, mcp, registrar: config.registrar });
+  } catch (e) {
+    config.registrar(`servidor local na porta ${cfg.porta}: ${e.message}`);
+  }
+  try { await janelas.iniciar(); } catch (e) { config.registrar(`motor: ${e.message}`); setTimeout(() => janelas.motorCaiu(), 100); }
+
+  sincronizar();
+  setInterval(() => sincronizar(), Math.max(1, cfg.cerebro.sincronizar_min) * 60_000);
+  fonte.observar(() => sincronizar());
+  setInterval(() => { try { janelas.vigiar(); } catch { /* segue */ } }, 700);
+
+  // Reiniciar o app não derruba os agentes (estão no motor): na volta, ele reencontra e reabre o time.
+  const reiniciar = () => setTimeout(() => { saindo = true; app.relaunch(); app.exit(0); }, 600);
+  const atualizador = new Atualizador({ cfg, registrar: config.registrar, avisar, janela: () => janela, aoInstalar: () => { saindo = true; } });
+  atualizador.iniciar();
+  provedores.todos().then(() => avisar({ tipo: 'contas' })).catch(() => {}); // já deixa o login de cada um conferido
+  const escolherArquivo = async ({ titulo, filtros, pasta }) => {
+    const r = await dialog.showOpenDialog(janela, { title: titulo, properties: [pasta ? 'openDirectory' : 'openFile'], filters: pasta ? undefined : filtros });
+    return r.canceled ? null : r.filePaths[0];
+  };
+  const definirTema = tema => {
+    const t = config.TEMAS[tema] || config.TEMAS.aurora;
+    if (!janela || janela.isDestroyed()) return;
+    janela.setBackgroundColor(t.fundo);
+    try { janela.setTitleBarOverlay({ color: t.fundo, symbolColor: t.simbolos, height: 40 }); } catch { /* sem barra */ }
+  };
+  definirTema(cfg.tema);
+  const rotas = criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador });
+  return { cfg, janelas, rotas, arquivos: new Arquivos(c.arquivos) };
+}
+
+function registrarProtocolo() {
+  protocol.handle('engram', async req => {
+    const url = new URL(req.url);
+    if (url.host === 'app') {
+      const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
+      const alvo = path.resolve(TELA, rel);
+      if (!alvo.startsWith(TELA + path.sep) || !fs.existsSync(alvo)) return new Response('não existe', { status: 404 });
+      const r = await net.fetch(pathToFileURL(alvo).toString());
+      const cab = { 'Content-Type': TIPOS[path.extname(alvo).toLowerCase()] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff' };
+      if (alvo.endsWith('.html')) cab['Content-Security-Policy'] = CSP;
+      return new Response(r.body, { status: 200, headers: cab });
+    }
+    if (url.host === 'arquivo' && nucleo) {
+      const [id, qual, nome] = url.pathname.replace(/^\/+/, '').split('/').map(decodeURIComponent);
+      try {
+        const alvo = nucleo.arquivos.caminhoExistente(id, qual, nome);
+        const r = await net.fetch(pathToFileURL(alvo).toString());
+        return new Response(r.body, { status: 200, headers: { 'Content-Type': Arquivos.tipo(alvo), 'Content-Security-Policy': 'sandbox', 'X-Content-Type-Options': 'nosniff' } });
+      } catch { return new Response('não encontrado', { status: 404 }); }
+    }
+    return new Response('não existe', { status: 404 });
+  });
+}
+
+function registrarIpc() {
+  ipcMain.handle('api', async (_e, { metodo, caminho, corpo }) => {
+    if (!nucleo) return { ok: false, status: 503, erro: 'o Engram ainda está abrindo' };
+    return nucleo.rotas(String(metodo || 'GET'), String(caminho || ''), corpo);
+  });
+  const assinaturas = new Map(); // `${webContentsId}:${id}` -> parar()
+  ipcMain.on('terminal:abrir', (e, id) => {
+    const chave = `${e.sender.id}:${id}`;
+    assinaturas.get(chave)?.();
+    const sub = nucleo?.janelas.ouvir(id, texto => {
+      if (e.sender.isDestroyed()) return;
+      if (texto === null) e.sender.send('terminal:fim', id);
+      else e.sender.send('terminal:dados', { id, dados: texto });
+    });
+    if (!sub) { e.sender.send('terminal:dados', { id, dados: '\r\n\x1b[2m[esta janela não está aberta]\x1b[0m\r\n', inicio: true }); return; }
+    assinaturas.set(chave, sub.parar);
+    e.sender.send('terminal:dados', { id, dados: sub.historico, inicio: true });
+    e.sender.once('destroyed', () => { sub.parar(); assinaturas.delete(chave); });
+  });
+  ipcMain.on('terminal:entrada', (_e, { id, dados }) => nucleo?.janelas.escrever(id, String(dados).slice(0, 65_536)));
+  ipcMain.on('terminal:tamanho', (_e, { id, colunas, linhas }) => nucleo?.janelas.redimensionar(id, colunas, linhas));
+  ipcMain.on('terminal:fechar', (e, id) => { const k = `${e.sender.id}:${id}`; assinaturas.get(k)?.(); assinaturas.delete(k); });
+}
+
+function temaInicial() {
+  try { return config.TEMAS[config.carregar().tema] || config.TEMAS.aurora; } catch { return config.TEMAS.aurora; }
+}
+
+function criarJanela() {
+  janela = new BrowserWindow({
+    width: 1520, height: 940, minWidth: 960, minHeight: 620, show: false,
+    backgroundColor: temaInicial().fundo, title: 'Engram',
+    icon: fs.existsSync(path.join(TELA, 'marca', 'engram.png')) ? path.join(TELA, 'marca', 'engram.png') : undefined,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: temaInicial().fundo, symbolColor: temaInicial().simbolos, height: 40 },
+    webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
+  });
+  janela.once('ready-to-show', () => janela.show());
+  janela.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('engram://arquivo/') && nucleo) {
+      const [id, qual, nome] = new URL(url).pathname.replace(/^\/+/, '').split('/').map(decodeURIComponent);
+      try { shell.openPath(nucleo.arquivos.caminhoExistente(id, qual, nome)); } catch { /* sumiu */ }
+    } else if (/^https?:\/\//i.test(url)) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+  janela.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('engram://app/')) e.preventDefault(); });
+  janela.loadURL('engram://app/index.html');
+  // Fechar a janela só esconde: o Engram fica na bandeja (e os agentes, no motor).
+  janela.on('close', e => {
+    if (saindo || !bandeja) return;
+    e.preventDefault();
+    janela.hide();
+    if (!avisouBandeja) {
+      avisouBandeja = true;
+      bandeja.displayBalloon({ title: 'O Engram continua aberto', content: 'Os agentes seguem trabalhando. Clique no ícone da bandeja para voltar.', iconType: 'info' });
+    }
+  });
+  janela.on('closed', () => { janela = null; });
+}
+
+let bandeja = null;
+let saindo = false;
+let avisouBandeja = false;
+
+function mostrar() {
+  if (!janela) return criarJanela();
+  if (janela.isMinimized()) janela.restore();
+  janela.show();
+  janela.focus();
+}
+
+function criarBandeja() {
+  const icone = nativeImage.createFromPath(path.join(TELA, 'marca', 'engram.png')).resize({ width: 16, height: 16 });
+  bandeja = new Tray(icone);
+  bandeja.setToolTip('Engram');
+  const menu = () => Menu.buildFromTemplate([
+    { label: 'Abrir o Engram', click: mostrar },
+    { label: `Agentes rodando: ${nucleo ? nucleo.janelas.ativas.size : '…'}`, enabled: false },
+    { type: 'separator' },
+    { label: 'Sair (os agentes continuam rodando)', click: () => { saindo = true; app.quit(); } },
+  ]);
+  bandeja.setContextMenu(menu());
+  bandeja.on('click', mostrar);
+  bandeja.on('right-click', () => bandeja.setContextMenu(menu()));
+}
+
+app.on('second-instance', mostrar);
+app.on('before-quit', () => { saindo = true; });
+
+app.whenReady().then(async () => {
+  app.setAppUserModelId('app.engram.desktop');
+  registrarProtocolo();
+  registrarIpc();
+  try { criarBandeja(); } catch (e) { config.registrar(`bandeja: ${e.message}`); }
+  criarJanela();
+  nucleo = await iniciarNucleo();
+});
+
+// Sem janela e sem bandeja, o app sai. Os agentes NÃO saem: continuam no motor.
+app.on('window-all-closed', () => { if (!bandeja) app.quit(); });

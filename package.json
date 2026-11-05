@@ -1,0 +1,79 @@
+{
+  "name": "engram",
+  "productName": "Engram",
+  "version": "0.1.0",
+  "description": "Palco de agentes de IA ligados por linhas, com cérebro de notas, arquivos por agente, skills e MCPs.",
+  "main": "src/main/index.js",
+  "private": true,
+  "author": "Engram",
+  "scripts": {
+    "start": "electron .",
+    "motor": "node scripts/preparar-motor.js",
+    "dist": "node scripts/preparar-motor.js && electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.18.0"
+  },
+  "dependencies": {
+    "@lydell/node-pty": "1.1.0",
+    "@xterm/headless": "5.5.0",
+    "electron-updater": "6.8.11",
+    "yaml": "2.8.1"
+  },
+  "build": {
+    "appId": "app.engram.desktop",
+    "productName": "Engram",
+    "copyright": "Engram",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "!src/motor/**",
+      "package.json",
+      "!node_modules/@lydell/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/motor-runtime",
+        "to": "motor",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/engram.ico",
+      "artifactName": "Engram-windows-x64.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Engram",
+      "uninstallDisplayName": "Engram",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "nathanfogaca",
+      "repo": "engram",
+      "releaseType": "release"
+    }
+  }
+}

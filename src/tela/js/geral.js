@@ -1,0 +1,117 @@
+// Ajustes: abas Geral (pasta de trabalho, cérebro, limites, contexto, atualização) e Aparência (temas).
+
+import { $, el, api, app, avisar } from "./util.js";
+
+// Paleta de cada tema, só para desenhar a miniatura (o tema de verdade está no app.css)
+export const PALETAS = {
+  aurora: { bg: "#04060a", sup: "#0c1018", a1: "#8b7bff", a2: "#38d6f5", a3: "#e879f9", tx: "#e7ecf6", resumo: "O de sempre: violeta e ciano no escuro" },
+  oceano: { bg: "#020a10", sup: "#08141e", a1: "#38bdf8", a2: "#2dd4bf", a3: "#818cf8", tx: "#e7ecf6", resumo: "Azul profundo, com brilho de água" },
+  brasa: { bg: "#0b0605", sup: "#180f0d", a1: "#fb923c", a2: "#f43f5e", a3: "#facc15", tx: "#f6ebe6", resumo: "Escuro quente, cor de fogo" },
+  grafite: { bg: "#0c0d0f", sup: "#17181b", a1: "#a5b4fc", a2: "#94a3b8", a3: "#cbd5e1", tx: "#e5e7eb", resumo: "Sóbrio, quase sem cor" },
+  claro: { bg: "#eef1f7", sup: "#ffffff", a1: "#6d5dfc", a2: "#0891b2", a3: "#c026d3", tx: "#0f172a", resumo: "Fundo claro para o dia (terminais seguem escuros)" },
+  "alto-contraste": { bg: "#000000", sup: "#000000", a1: "#ffd600", a2: "#00e5ff", a3: "#ff6eff", tx: "#ffffff", resumo: "Preto e branco, bordas fortes, sem transparência" },
+};
+
+/** Troca o tema na hora (com transição suave) e guarda para a próxima abertura. */
+export function aplicarTema(tema, { salvar = false } = {}) {
+  const raiz = document.documentElement;
+  raiz.classList.add("trocando-tema");
+  raiz.dataset.tema = tema;
+  setTimeout(() => raiz.classList.remove("trocando-tema"), 600);
+  try { localStorage.setItem("engram.tema", tema); } catch { /* sem armazenamento */ }
+  app.tema = tema;
+  if (salvar) return api("/api/tema", { json: { tema } }).catch(e => avisar({ texto: e.message, cor: "#ff6b7d" }));
+  return null;
+}
+
+export function miniatura(id) {
+  const p = PALETAS[id] || PALETAS.aurora;
+  return el("div", { class: "tema-mini", style: { "--bg": p.bg, "--sup": p.sup, "--a1": p.a1, "--a2": p.a2, "--a3": p.a3, "--tx": p.tx } },
+    el("i", { class: "m-barra" }), el("i", { class: "m-cartao um" }), el("i", { class: "m-cartao dois" }), el("i", { class: "m-fio" }), el("i", { class: "m-brilho" }));
+}
+
+export class PainelAparencia {
+  constructor(raiz) { this.raiz = raiz; }
+
+  carregar() {
+    const temas = app.temas || Object.keys(PALETAS).map(id => ({ id, nome: id }));
+    this.raiz.replaceChildren(
+      el("div", { class: "temas" }, ...temas.map((t, i) => el("button", {
+        type: "button", class: `tema-cartao${app.tema === t.id ? " ativo" : ""}`, style: { "--i": i, "--a1": PALETAS[t.id]?.a1 || "#8b7bff" },
+        onclick: async () => { aplicarTema(t.id, { salvar: true }); this.carregar(); },
+      }, miniatura(t.id), el("b", { text: t.nome }), el("small", { text: PALETAS[t.id]?.resumo || "" })))),
+      el("p", { class: "aj-nota", text: "O tema muda na hora e fica salvo. Os terminais dos agentes continuam escuros em todos os temas, porque os CLIs foram feitos para isso." }));
+  }
+}
+
+export class PainelGeral {
+  constructor(raiz, { aoReiniciar }) { this.raiz = raiz; this.aoReiniciar = aoReiniciar; }
+
+  async carregar() {
+    try { this.c = await api("/api/config"); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); return; }
+    this.desenhar();
+  }
+
+  desenhar() {
+    const c = this.c;
+    const campo = (rotulo, entrada, dica) => el("label", { class: "aj-campo" }, el("span", { text: rotulo }), entrada, dica ? el("small", { class: "aj-dica", text: dica }) : null);
+    const pasta = el("input", { value: c.pasta_trabalho || "", spellcheck: "false" });
+    const escolher = (alvo, titulo) => el("button", { type: "button", class: "btn pequeno", onclick: async () => { const r = await api("/api/escolher-pasta", { json: { titulo } }); if (r.caminho) alvo.value = r.caminho; } }, "Escolher…");
+    let fonte = c.cerebro.fonte || "pasta";
+    const cerPasta = el("input", { value: c.cerebro.pasta || "", spellcheck: "false" });
+    const cerUrl = el("input", { value: c.cerebro.url || "", placeholder: "https://servidor:8765/mcp", spellcheck: "false" });
+    const cerToken = el("input", { value: c.cerebro.token_env || "", placeholder: "ex.: CEREBRO_TOKEN", spellcheck: "false" });
+    const cerCa = el("input", { value: c.cerebro.ca || "", placeholder: "caminho do certificado (opcional)", spellcheck: "false" });
+    const cerRemota = el("input", { value: c.cerebro.pasta_remota || "cerebro", spellcheck: "false" });
+    const cerServidor = el("input", { value: c.cerebro.servidor || "", placeholder: "o nome dele em MCPs (ex.: cerebro)", spellcheck: "false" });
+    const blocoPasta = el("div", { class: "aj-campos" }, el("div", { class: "aj-campo largo" }, el("span", { text: "Pasta das notas" }), el("div", { class: "linha" }, cerPasta, escolher(cerPasta, "Pasta do cérebro"))));
+    const blocoRemoto = el("div", { class: "aj-campos" },
+      campo("Endereço do MCP", cerUrl), campo("Variável com o token", cerToken, "O token fica na variável de ambiente, não no Engram."),
+      campo("Certificado (CA)", cerCa), campo("Pasta no servidor", cerRemota),
+      campo("Nome do MCP nos agentes", cerServidor, "Cadastre o mesmo servidor em MCPs para os agentes lerem e gravarem as notas."));
+    const seg = el("div", { class: "aj-seg" });
+    const desenharFonte = () => {
+      seg.replaceChildren(...[["pasta", "Pasta neste computador"], ["remoto", "Servidor remoto (avançado)"]].map(([f, r]) =>
+        el("button", { type: "button", class: fonte === f ? "ativo" : "", onclick: () => { fonte = f; desenharFonte(); } }, r)));
+      blocoPasta.hidden = fonte !== "pasta";
+      blocoRemoto.hidden = fonte !== "remoto";
+    };
+    desenharFonte();
+    const num = (v, a, z) => el("input", { type: "number", min: a, max: z, value: v ?? "" });
+    const maxJ = num(c.max_janelas, 1, 24), maxM = num(c.max_mensagens_par_10min, 5, 300), maxA = num(c.max_arquivo_mb, 1, 2000);
+    const contexto = el("textarea", { rows: 6, placeholder: "Texto que entra no prompt de todas as janelas: o mapa dos sistemas da empresa, regras da casa, quem cuida do quê…" });
+    contexto.value = c.contexto || "";
+    let atualizar = c.atualizar_sozinho;
+    const salvar = async () => {
+      const corpo = {
+        pasta_trabalho: pasta.value, max_janelas: maxJ.value, max_mensagens_par_10min: maxM.value, max_arquivo_mb: maxA.value,
+        contexto: contexto.value, atualizar_sozinho: atualizar,
+        cerebro: fonte === "remoto" ? { fonte, url: cerUrl.value, token_env: cerToken.value, ca: cerCa.value, pasta_remota: cerRemota.value, servidor: cerServidor.value } : { fonte, pasta: cerPasta.value },
+      };
+      try {
+        const r = await api("/api/config", { json: corpo });
+        if (r.reiniciar) {
+          avisar({ texto: "Salvo. O cérebro muda quando o Engram reiniciar (os agentes continuam rodando).", cor: "#ffc857", tempo: 8000 });
+          this.raiz.querySelector(".aj-reiniciar").hidden = false;
+        } else avisar({ texto: "Ajustes salvos", cor: "#4ade9f" });
+        await this.carregar();
+      } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d", tempo: 7000 }); }
+    };
+    this.raiz.replaceChildren(
+      el("section", { class: "aj-grupo" }, el("h3", { text: "Onde os agentes trabalham" }),
+        el("div", { class: "aj-campo" }, el("span", { text: "Pasta de trabalho" }), el("div", { class: "linha" }, pasta, escolher(pasta, "Pasta de trabalho dos agentes")),
+          el("small", { class: "aj-dica", text: "É onde cada janela nova abre. Janelas já abertas continuam onde estão." }))),
+      el("section", { class: "aj-grupo" }, el("h3", { text: "Cérebro" }), seg, blocoPasta, blocoRemoto,
+        el("small", { class: "aj-dica", text: `O normal é a pasta neste computador. O servidor remoto é para quem já tem as notas num servidor próprio, com as ferramentas arquivos_listar e arquivos_ler. Em uso agora: ${c.cerebro_fonte_ativa === "remoto" ? "servidor remoto" : "pasta neste computador"}. Trocar a fonte vale depois de reiniciar o Engram.` })),
+      el("section", { class: "aj-grupo" }, el("h3", { text: "Limites" }),
+        el("div", { class: "aj-campos tres" }, campo("Janelas abertas ao mesmo tempo", maxJ), campo("Mensagens entre dois agentes a cada 10 min", maxM, "Trava contra dois agentes respondendo um ao outro em loop."), campo("Tamanho máximo de arquivo (MB)", maxA))),
+      el("section", { class: "aj-grupo" }, el("h3", { text: "Contexto para todos os agentes" }), el("div", { class: "aj-campo" }, contexto)),
+      el("section", { class: "aj-grupo" }, el("h3", { text: "Atualização" }),
+        el("label", { class: "aj-opcao" }, (() => { const i = el("input", { type: "checkbox", checked: atualizar, onchange: e => { atualizar = e.target.checked; } }); return el("span", { class: "chave" }, i, el("span")); })(),
+          el("span", {}, "Instalar atualizações sozinho ", el("small", { text: `(quando a janela não está em uso · versão ${c.versao})` })))),
+      el("div", { class: "aj-acoes rodape-geral" },
+        el("small", { class: "aj-nota", text: `Dados do Engram: ${c.dados}` }), el("span", { class: "empurra" }),
+        el("button", { type: "button", class: "btn pequeno aj-reiniciar", hidden: true, onclick: () => this.aoReiniciar?.() }, "Reiniciar agora"),
+        el("button", { type: "button", class: "btn-brilho pequeno", onclick: salvar }, el("span", { text: "Salvar" }))));
+  }
+}

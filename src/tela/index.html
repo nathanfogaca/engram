@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engram</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='.4' stop-color='%238b7bff'/%3E%3Cstop offset='1' stop-color='%238b7bff' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='%2305070b'/%3E%3Ccircle cx='16' cy='16' r='12' fill='url(%23g)'/%3E%3C/svg%3E">
+<script src="js/tema-cedo.js"></script>
+<link rel="stylesheet" href="vendor/xterm.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<!-- ================================================================ barra -->
+<header class="topo">
+  <div class="marca">
+    <svg class="marca-icone" viewBox="0 0 40 40" aria-hidden="true">
+      <defs>
+        <linearGradient id="marca-g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#8b7bff"/><stop offset=".5" stop-color="#38d6f5"/><stop offset="1" stop-color="#e879f9"/>
+        </linearGradient>
+        <filter id="marca-brilho"><feGaussianBlur stdDeviation="1.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <g class="marca-giro" filter="url(#marca-brilho)">
+        <path d="M20 7 L32 26 L8 26 Z" fill="none" stroke="url(#marca-g)" stroke-width="1.6"/>
+        <circle cx="20" cy="7" r="3.4" fill="#8b7bff"/><circle cx="32" cy="26" r="3.4" fill="#38d6f5"/><circle cx="8" cy="26" r="3.4" fill="#e879f9"/>
+      </g>
+      <circle cx="20" cy="20" r="2.4" fill="#fff" class="marca-nucleo"/>
+    </svg>
+    <span class="marca-nome">Engram</span>
+  </div>
+
+  <nav class="seg" id="seg" role="tablist">
+    <span class="seg-pilula" aria-hidden="true"></span>
+    <button data-vista="palco" class="ativo" role="tab">Palco</button>
+    <button data-vista="cerebro" role="tab">Cérebro</button>
+  </nav>
+
+  <div class="busca" id="busca-caixa">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <input id="busca" type="search" placeholder="Buscar no cérebro…" autocomplete="off" spellcheck="false">
+    <kbd>Ctrl K</kbd>
+    <div class="resultados" id="resultados" hidden></div>
+  </div>
+
+  <div class="acoes">
+    <button class="atualizacao" id="atualizacao" hidden></button>
+    <button class="sinc" id="sinc" title="Sincronizar o cérebro com o servidor"><span class="sinc-ponto"></span><span id="sinc-texto">—</span></button>
+    <button class="btn btn-contas" id="btn-contas" title="Ajustes: geral, aparência, contas, MCPs e skills (Ctrl+,)"><span class="contas-pontos" id="contas-pontos"></span>Ajustes</button>
+    <button class="btn" id="btn-time" title="Janelas abertas e anteriores">Time</button>
+    <button class="btn" id="btn-consulta" title="SQL só leitura no cérebro">Consulta</button>
+    <button class="btn-brilho" id="btn-agente"><span>+ Agente</span></button>
+  </div>
+</header>
+
+<!-- ================================================================ palco -->
+<section class="vista" id="palco">
+  <div class="grade" id="grade"></div>
+  <div class="mundo" id="mundo">
+    <svg class="fios" id="fios" aria-hidden="true">
+      <defs>
+        <filter id="borrar" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter>
+        <filter id="brilho" x="-200%" y="-200%" width="500%" height="500%">
+          <feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <g id="gradientes"></g>
+      </defs>
+      <g id="fios-g"></g>
+      <g id="particulas"></g>
+    </svg>
+    <div id="cartoes"></div>
+    <div id="lembrancas"></div>
+  </div>
+
+  <div class="vazio-palco" id="vazio-palco" hidden>
+    <div class="hero">
+      <div class="hero-orbe" aria-hidden="true"><i></i><i></i><i></i></div>
+      <h1>Monte o seu time</h1>
+      <p>Cada agente é uma IA de verdade (Claude Code e outros), com o cérebro e os seus MCPs. Arraste do ponto na borda de um cartão até outro: os dois passam a conversar.</p>
+      <div class="hero-acoes">
+        <button class="btn-brilho grande" data-novo="maestro"><span>Começar com um maestro</span></button>
+        <button class="btn grande" data-novo="livre">+ Agente</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hud">
+    <span class="hud-dica" id="hud-dica">Arraste o fundo para mover · roda do mouse aproxima · ⤢ no cartão abre o leitor grande · duplo clique no topo foca</span>
+    <div class="hud-zoom">
+      <button class="btn-icone" id="zoom-menos" title="Afastar">−</button>
+      <button class="hud-pct" id="zoom-pct" title="Voltar para 100%">100%</button>
+      <button class="btn-icone" id="zoom-mais" title="Aproximar">+</button>
+      <button class="btn-icone" id="enquadrar" title="Enquadrar o time">⤢</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ cérebro -->
+<section class="vista oculta" id="cerebro">
+  <canvas id="cerebro-tela"></canvas>
+  <div class="cerebro-info" id="cerebro-info"></div>
+  <div class="legenda" id="legenda"></div>
+  <div class="hud">
+    <span class="hud-dica">Passe o mouse para ver as ligações · clique para abrir · arraste uma estrela</span>
+    <div class="hud-zoom">
+      <button class="btn-icone" id="cerebro-enquadrar" title="Enquadrar">⤢</button>
+      <button class="btn-icone" id="cerebro-agitar" title="Reorganizar">↻</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ gaveta -->
+<aside class="gaveta" id="gaveta" aria-hidden="true">
+  <header class="gaveta-cab">
+    <nav class="gaveta-abas" id="gaveta-abas">
+      <button data-aba="nota">Nota</button>
+      <button data-aba="consulta">Consulta</button>
+      <button data-aba="time">Time</button>
+      <span class="gaveta-sublinha"></span>
+    </nav>
+    <button class="btn-icone" id="gaveta-fechar" title="Fechar (Esc)">×</button>
+  </header>
+  <div class="gaveta-corpo">
+    <div class="aba" id="aba-nota"></div>
+    <div class="aba" id="aba-consulta" hidden>
+      <div class="pad">
+        <p class="discreto">SQL só leitura no índice do cérebro: <code>notas</code>, <code>ligacoes</code>, <code>sessoes</code>, <code>toques</code>, <code>mensagens</code>, <code>conexoes</code>.</p>
+        <div class="exemplos" id="exemplos"></div>
+        <textarea id="sql" spellcheck="false" rows="7"></textarea>
+        <div class="linha"><button class="btn-brilho pequeno" id="btn-sql"><span>Rodar</span></button><span class="discreto">Ctrl+Enter</span><span class="discreto empurra" id="sql-info"></span></div>
+      </div>
+      <div class="tabela-wrap" id="sql-resultado"></div>
+    </div>
+    <div class="aba" id="aba-time" hidden></div>
+  </div>
+</aside>
+
+<!-- ================================================================ leitor grande -->
+<aside class="leitor" id="leitor" aria-hidden="true">
+  <header class="leitor-cab">
+    <div class="leitor-abas" id="leitor-abas"></div>
+    <button class="btn-icone" id="leitor-fechar" title="Fechar (Esc)">×</button>
+  </header>
+  <div class="leitor-corpo" id="leitor-corpo"></div>
+</aside>
+
+<!-- ================================================================ novo agente -->
+<dialog class="dlg" id="dlg-agente">
+  <form method="dialog" id="form-agente">
+    <header>
+      <h2 id="ag-titulo">Novo agente</h2>
+      <p class="discreto">Um agente completo, com o cérebro e o time. Ele aparece no palco, pronto para ligar.</p>
+    </header>
+    <label class="campo"><span>Nome</span><input id="ag-nome" maxlength="40" required autocomplete="off" spellcheck="false"></label>
+    <div class="campo"><span>Agente</span><div class="opcoes-agente" id="ag-agentes"></div></div>
+    <div class="campo"><span>Modelo</span><div class="opcoes-modelo" id="ag-modelos"></div>
+      <input id="ag-modelo-livre" class="modelo-livre" placeholder="id do modelo, ex.: gpt-6-luna" maxlength="100" autocomplete="off" spellcheck="false" hidden></div>
+    <div class="campo" id="ag-mcps-campo"><span>MCPs desta janela</span><div class="aj-chips" id="ag-mcps"></div></div>
+    <div class="campo"><span>Papel</span><div class="opcoes-papel" id="ag-papeis"></div></div>
+    <footer>
+      <button value="cancelar" class="btn" formnovalidate>Cancelar</button>
+      <button value="abrir" class="btn-brilho"><span>Abrir no palco</span></button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- ================================================================ contas -->
+<dialog class="dlg dlg-contas" id="dlg-contas">
+  <form method="dialog">
+    <header class="contas-cab">
+      <div>
+        <h2 id="ajustes-titulo">Contas e agentes</h2>
+        <p class="discreto" id="ajustes-sub"></p>
+      </div>
+    </header>
+    <nav class="ajustes-abas" id="ajustes-abas">
+      <button type="button" data-aba="geral" class="ativo"><i>⚙</i>Geral</button>
+      <button type="button" data-aba="aparencia"><i>◐</i>Aparência</button>
+      <button type="button" data-aba="contas"><i>◉</i>Contas</button>
+      <button type="button" data-aba="mcps"><i>⇄</i>MCPs</button>
+      <button type="button" data-aba="skills"><i>✦</i>Skills</button>
+    </nav>
+    <section class="ajustes-aba" id="aba-geral" hidden></section>
+    <section class="ajustes-aba" id="aba-aparencia" hidden></section>
+    <section class="ajustes-aba" id="aba-contas" hidden>
+      <div class="aj-barra"><span class="empurra"></span><button type="button" class="btn-icone" id="contas-atualizar" title="Conferir de novo">↻</button></div>
+      <div class="contas-lista" id="contas-lista"></div>
+      <section class="contas-terminal" id="contas-terminal" hidden>
+        <div class="contas-term-cab">
+          <span class="ponto"></span><b id="contas-term-titulo">Terminal</b>
+          <span class="discreto" id="contas-term-dica"></span>
+          <button type="button" class="btn" id="contas-term-fechar">Fechar</button>
+        </div>
+        <div class="contas-term" id="contas-term"></div>
+      </section>
+    </section>
+    <section class="ajustes-aba" id="aba-mcps" hidden></section>
+    <section class="ajustes-aba" id="aba-skills" hidden></section>
+    <footer><button value="fechar" class="btn">Fechar</button></footer>
+  </form>
+</dialog>
+
+<div class="menu-fio" id="menu-fio" hidden></div>
+<div class="avisos" id="avisos" aria-live="polite"></div>
+
+<div class="sem-acesso" id="sem-acesso" hidden>
+  <div class="hero">
+    <h1>Sem acesso</h1>
+    <p>Abra o Engram pelo link de acesso. No terminal, na pasta do Engram:</p>
+    <pre>.venv\Scripts\python -m engram --link</pre>
+  </div>
+</div>
+
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<script src="vendor/addon-webgl.js"></script>
+<script src="vendor/markdown-it.min.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
