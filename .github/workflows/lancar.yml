@@ -2,6 +2,8 @@
 #   git tag v0.2.0 && git push origin v0.2.0
 # O GitHub Actions empacota o instalador do Windows e publica no GitHub Releases, junto com o
 # latest.yml que o app instalado consulta para se atualizar sozinho.
+# Para refazer o release de uma tag (ex.: faltou um arquivo): Actions > Lançar versão > Run workflow,
+# informando a tag. O código usado é o da tag; o release existente recebe os arquivos de novo.
 
 name: Lançar versão
 
@@ -9,6 +11,10 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da versão para refazer o release (ex.: v0.1.2)'
+        required: true
 
 permissions:
   contents: write
@@ -16,26 +22,44 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       - name: Conferir que a tag bate com a versão do package.json
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           VERSAO="v$(node -p "require('./package.json').version")"
-          if [ "$VERSAO" != "${GITHUB_REF_NAME}" ]; then echo "A tag ${GITHUB_REF_NAME} não bate com o package.json ($VERSAO)"; exit 1; fi
+          if [ "$VERSAO" != "$TAG" ]; then echo "A tag $TAG não bate com o package.json ($VERSAO)"; exit 1; fi
       - name: Runtime do motor
         run: node scripts/preparar-motor.js
-      - name: Empacotar e publicar no GitHub Releases
+      - name: Empacotar
         # bash: o PowerShell quebra "-c.publish.repo=..." no ponto e o electron-builder lê como arquivo
         shell: bash
-        run: npx electron-builder --win --publish always -c.publish.owner=${{ github.repository_owner }} -c.publish.repo=${{ github.event.repository.name }}
+        run: npx electron-builder --win --publish never -c.publish.owner=${{ github.repository_owner }} -c.publish.repo=${{ github.event.repository.name }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # sem certificado de assinatura por enquanto: o Windows avisa na primeira instalação
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Publicar no GitHub Releases
+        # um passo só cria o release e envia os três arquivos juntos (o envio do electron-builder
+        # criava o release em paralelo e às vezes perdia o instalador)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARQUIVOS="dist/Engram-windows-x64.exe dist/Engram-windows-x64.exe.blockmap dist/latest.yml"
+          ls -la $ARQUIVOS
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" $ARQUIVOS --clobber
+          else
+            git log -1 --format=%B > notas.txt
+            gh release create "$TAG" $ARQUIVOS --title "Engram ${TAG#v}" --notes-file notas.txt
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name'
