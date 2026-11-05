@@ -109,6 +109,22 @@ section.bloco { padding: 120px 0 0; }
 .quadro img { width: 100%; cursor: zoom-in; transition: transform .8s var(--suave); }
 .quadro:hover img { transform: scale(1.015); }
 
+/* o cérebro */
+.destaque-gif { position: relative; border-radius: 22px; overflow: hidden; border: 1px solid rgba(139,123,255,.35); background: #03050a;
+  box-shadow: 0 40px 120px rgba(0,0,0,.6), 0 0 90px -20px rgba(139,123,255,.55); }
+.destaque-gif img { width: 100%; cursor: zoom-in; }
+.destaque-gif figcaption, .vivo figcaption { position: absolute; left: 16px; bottom: 14px; padding: 7px 13px; border-radius: 999px; font-size: 13.5px; background: rgba(4,6,10,.75); border: 1px solid var(--borda); backdrop-filter: blur(8px); }
+.estados { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 18px; }
+.estado { margin: 0; border-radius: 18px; overflow: hidden; background: rgba(255,255,255,.025); border: 1px solid var(--borda); transition: transform .4s var(--mola), border-color .3s, box-shadow .4s; }
+.estado:hover { transform: translateY(-4px); border-color: rgba(139,123,255,.45); box-shadow: 0 20px 50px -20px rgba(139,123,255,.6); }
+.estado img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: 50% 45%; cursor: zoom-in; }
+.estado figcaption { padding: 14px 16px 16px; }
+.estado b { display: block; font: 700 17px Sora, sans-serif; margin-bottom: 4px; }
+.estado span { color: var(--discreto); font-size: 14.5px; }
+.estado .numero { float: right; font: 700 13px Inter, sans-serif; color: var(--ciano); padding: 3px 10px; border-radius: 999px; background: rgba(56,214,245,.1); border: 1px solid rgba(56,214,245,.3); }
+.vivo { position: relative; margin: 0; border-radius: 18px; overflow: hidden; border: 1px solid var(--borda-forte); background: #03050a; }
+.vivo img { width: 100%; cursor: zoom-in; }
+
 /* grade de funcionalidades */
 .bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
 .cartao { --c: var(--violeta); position: relative; grid-column: span 2; display: flex; flex-direction: column; gap: 10px; padding: 24px; border-radius: 22px; overflow: hidden;
@@ -207,6 +223,7 @@ dialog.lupa img { max-width: 96vw; max-height: 94vh; border-radius: 14px; border
   .cartao.inteiro { grid-column: span 2; }
   .seguro { grid-template-columns: 1fr 1fr; }
   .galeria { grid-template-columns: 1fr; }
+  .estados { grid-template-columns: 1fr; }
   .diagrama { grid-template-columns: 1fr; }
   .fio { width: 2px; height: 40px; margin: 0 auto; background: linear-gradient(var(--ciano), var(--verde)); }
   .fio::after { left: -3px; top: 0; animation: viajar-v 2.2s ease-in-out infinite; }
@@ -239,6 +256,7 @@ dialog.lupa img { max-width: 96vw; max-height: 94vh; border-radius: 14px; border
   </a>
   <nav>
     <a href="#palco">Palco</a>
+    <a href="#cerebro">Cérebro</a>
     <a href="#recursos">Recursos</a>
     <a href="#temas">Temas</a>
     <a href="#perguntas">Perguntas</a>
@@ -294,6 +312,39 @@ dialog.lupa img { max-width: 96vw; max-height: 94vh; border-radius: 14px; border
     </div>
   </section>
 
+  <section class="bloco" id="cerebro">
+    <div class="envolve">
+      <div class="cab-secao centro revelar">
+        <span class="rotulo">O cérebro</span>
+        <h2>Uma memória que vira <span class="grad">rede de neurônios</span></h2>
+        <p>Cada nota é um neurônio. Ligações viram fibras, e quando um agente lê ou grava uma nota, o impulso corre até ela. Casos e memórias de um lado; sistemas, tabelas e projetos do outro.</p>
+      </div>
+      <figure class="destaque-gif revelar">
+        <img src="img/agente-lendo.gif" alt="Um agente lendo notas do cérebro: fibras tracejadas saem dele até cada nota, anéis se abrem e impulsos correm pelas fibras" loading="lazy" data-lupa>
+        <figcaption>Um agente de verdade lendo quatro notas do cérebro</figcaption>
+      </figure>
+      <div class="estados">
+        <figure class="estado revelar"><img src="img/cerebro-comeco.webp" alt="O cérebro no primeiro dia, com poucas notas" loading="lazy" data-lupa>
+          <figcaption><span class="numero">5 notas</span><b>Primeiro dia</b><span>Quase vazio: o guia, um sistema, uma tabela e o primeiro chamado.</span></figcaption></figure>
+        <figure class="estado revelar"><img src="img/cerebro-meio.webp" alt="O cérebro crescendo, com 26 notas ligadas" loading="lazy" data-lupa>
+          <figcaption><span class="numero">26 notas</span><b>Crescendo</b><span>Os agentes gravam o que aprendem e as ligações aparecem sozinhas.</span></figcaption></figure>
+        <figure class="estado revelar"><img src="img/cerebro-cheio.webp" alt="O cérebro cheio, com 148 notas em seis sistemas" loading="lazy" data-lupa>
+          <figcaption><span class="numero">148 notas</span><b>Cheio</b><span>Seis sistemas, dezenas de chamados e os padrões que se repetem.</span></figcaption></figure>
+      </div>
+      <div class="duas invertido" style="margin-top:60px">
+        <figure class="vivo revelar"><img src="img/cerebro-vivo.gif" alt="O mouse passa por neurônios e cada um acende só as suas ligações" loading="lazy" data-lupa><figcaption>Passe o mouse: cada neurônio mostra as suas ligações</figcaption></figure>
+        <div class="revelar">
+          <ul class="lista-viva">
+            <li><span>⚡</span><div><b>Vivo de verdade</b><p>De vez em quando um neurônio dispara sozinho, e o impulso acende os vizinhos em cascata.</p></div></li>
+            <li><span>◎</span><div><b>Veja quem leu o quê</b><p>Os agentes ficam embaixo, como o tronco do cérebro, ligados às notas que tocaram.</p></div></li>
+            <li><span>⌕</span><div><b>Busque e navegue</b><p>A busca acende as notas encontradas; clique num neurônio para abrir a nota.</p></div></li>
+            <li><span>◌</span><div><b>O que falta documentar</b><p>Notas citadas que ainda não existem aparecem como neurônios fantasmas.</p></div></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="bloco" id="recursos">
     <div class="envolve">
       <div class="cab-secao centro revelar">
@@ -304,8 +355,8 @@ dialog.lupa img { max-width: 96vw; max-height: 94vh; border-radius: 14px; border
       <div class="bento">
         <article class="cartao largo revelar" style="--c:#e879f9">
           <div class="icone">✺</div><h3>Um cérebro que fica com você</h3>
-          <p>Notas em Markdown ligadas por <code>[[id]]</code>: chamados, tabelas, padrões, sistemas e projetos. Os agentes leem antes de investigar do zero e gravam o que aprendem. Você vê tudo como uma constelação viva, com cada agente ligado às notas que tocou.</p>
-          <div class="mini"><img src="img/cerebro.webp" alt="A constelação do cérebro com as notas e os agentes ligados a elas" loading="lazy" data-lupa></div>
+          <p>Notas em Markdown ligadas por <code>[[id]]</code>: chamados, tabelas, padrões, sistemas e projetos. Os agentes leem antes de investigar do zero e gravam o que aprendem. Você vê tudo como uma rede de neurônios, com cada agente ligado às notas que tocou.</p>
+          <div class="mini"><img src="img/cerebro-meio.webp" alt="O cérebro como rede de neurônios, com as notas e o agente ligado a elas" loading="lazy" data-lupa></div>
         </article>
         <article class="cartao largo revelar" style="--c:#38d6f5">
           <div class="icone">❝</div><h3>Conversa legível, sem gastar token</h3>

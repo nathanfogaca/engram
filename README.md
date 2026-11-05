@@ -22,7 +22,7 @@ Um maestro divide o trabalho, cada um usa o modelo certo, e o que eles aprendem 
 | **Palco de agentes** | Cada agente é um cartão. Arraste uma linha entre dois e eles conversam; as mensagens correm pela linha. Um **maestro** recebe o pedido, delega e junta os resultados. |
 | **Vários agentes** | Claude Code e Codex completos, no mesmo time. Gemini CLI e OpenCode como experimentais. Cada janela com o seu modelo. |
 | **O time não cai** | Os agentes rodam num motor separado: fechar, reiniciar ou atualizar o app não derruba ninguém, e a conversa continua de onde parou. |
-| **Cérebro de notas** | Notas em Markdown ligadas por `[[id]]`, vistas como uma constelação viva. Os agentes leem antes de investigar e gravam o que aprendem. Fica numa pasta sua. |
+| **Cérebro de notas** | Notas em Markdown ligadas por `[[id]]`, vistas como uma rede de neurônios viva. Os agentes leem antes de investigar e gravam o que aprendem. Fica numa pasta sua. |
 | **Conversa legível** | O cartão mostra a conversa em texto, sem gastar token. Leitor grande, arquivos por agente (mande logs e prints; ele devolve o que fez). |
 | **MCPs fáceis** | Cadastre, teste, ligue e desligue servidores MCP (HTTP ou programa local), por agente. Traga os que já estão no Claude Code e no Codex. |
 | **Skills** | Biblioteca de skills (SKILL.md) com editor e prévia; importe `.zip` ou `.skill`. |
@@ -30,9 +30,21 @@ Um maestro divide o trabalho, cada um usa o modelo certo, e o que eles aprendem 
 | **Temas** | Aurora, Oceano, Brasa, Grafite, Claro e Alto contraste. Troca na hora. |
 | **Atualização automática** | Novas versões chegam sozinhas pelo GitHub Releases. |
 
+## O cérebro
+
+Cada nota é um neurônio; ligações viram fibras. Quando um agente lê ou grava uma nota, o impulso corre até ela.
+
+<img src="docs/img/agente-lendo.gif" alt="Um agente lendo notas do cérebro" width="100%">
+
+| Primeiro dia (5 notas) | Crescendo (26 notas) | Cheio (148 notas) |
+|---|---|---|
+| <img src="docs/img/cerebro-comeco.webp" alt="Cérebro com poucas notas"> | <img src="docs/img/cerebro-meio.webp" alt="Cérebro crescendo"> | <img src="docs/img/cerebro-cheio.webp" alt="Cérebro cheio"> |
+
+## Mais do app
+
 <table>
 <tr>
-<td width="50%"><img src="docs/img/cerebro.webp" alt="A constelação do cérebro"><br><sub><b>Cérebro.</b> Notas, ligações e os agentes que tocaram cada uma.</sub></td>
+<td width="50%"><img src="docs/img/cerebro-vivo.gif" alt="O cérebro vivo"><br><sub><b>Cérebro.</b> Passe o mouse e cada neurônio mostra as suas ligações.</sub></td>
 <td width="50%"><img src="docs/img/leitor.webp" alt="O leitor grande"><br><sub><b>Leitor.</b> A conversa do maestro com as respostas dos colegas.</sub></td>
 </tr>
 <tr>
