@@ -17,8 +17,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -32,6 +32,8 @@ jobs:
       - name: Runtime do motor
         run: node scripts/preparar-motor.js
       - name: Empacotar e publicar no GitHub Releases
+        # bash: o PowerShell quebra "-c.publish.repo=..." no ponto e o electron-builder lê como arquivo
+        shell: bash
         run: npx electron-builder --win --publish always -c.publish.owner=${{ github.repository_owner }} -c.publish.repo=${{ github.event.repository.name }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
