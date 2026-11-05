@@ -9,6 +9,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const https = require('node:https');
 const http = require('node:http');
+const { opcoesDeConexao } = require('./tls-proprio');
 
 const LEIAME = `---
 tipo: guia
@@ -132,9 +133,10 @@ class FonteRemota {
     await this.esperarVez();
     const corpo = JSON.stringify({ jsonrpc: '2.0', id: ++this.n, method: 'tools/call', params: { name: ferramenta, arguments: argumentos } });
     const mod = this.url.protocol === 'https:' ? https : http;
+    const conexao = await opcoesDeConexao(this.url, this.ca); // certificado conferido antes de o token sair
     const resposta = await new Promise((resolve, reject) => {
       const req = mod.request(this.url, {
-        method: 'POST', ca: this.ca, timeout: 60_000,
+        ...conexao, method: 'POST', timeout: 60_000,
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'Content-Length': Buffer.byteLength(corpo) },
       }, res => {
         let dados = '';

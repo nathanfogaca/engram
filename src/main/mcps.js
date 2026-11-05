@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const https = require('node:https');
+const { opcoesDeConexao } = require('./tls-proprio');
 const { spawn } = require('node:child_process');
 
 const ID = /^[A-Za-z0-9_-]{1,40}$/;
@@ -255,15 +256,17 @@ function daClaude(nome, d, origem) {
 
 const PEDIDO_INICIO = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'engram-teste', version: '1' } } };
 
-function postar(url, corpo, headers, ca, sessao) {
+async function postar(url, corpo, headers, ca, sessao) {
+  const u = new URL(url);
+  let pem = null;
+  if (ca) { try { pem = fs.readFileSync(ca); } catch { throw new Error(`não li o certificado ${ca}`); } }
+  const conexao = await opcoesDeConexao(u, pem, 15_000); // certificado conferido antes dos cabeçalhos saírem
   return new Promise((resolve, reject) => {
-    const u = new URL(url);
     const mod = u.protocol === 'https:' ? https : http;
     const dados = JSON.stringify(corpo);
     const cab = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'Content-Length': Buffer.byteLength(dados), ...headers };
     if (sessao) cab['Mcp-Session-Id'] = sessao;
-    const opcoes = { method: 'POST', headers: cab, timeout: 15_000 };
-    if (ca) { try { opcoes.ca = fs.readFileSync(ca); } catch { return reject(new Error(`não li o certificado ${ca}`)); } }
+    const opcoes = { ...conexao, method: 'POST', headers: cab, timeout: 15_000 };
     const req = mod.request(u, opcoes, res => {
       let texto = '';
       res.setEncoding('utf8');
