@@ -277,6 +277,12 @@ Ela também instala sozinha quando você não estiver usando a janela. Os agente
       avisouPronta = a.versao_nova;
       avisar({ rota: `Engram ${a.versao_nova}`, texto: "baixada e conferida: instala quando você não estiver usando a janela, ou clique no selo do topo", cor: "#4ade9f", tempo: 9000 });
     }
+  } else if (a.estado === "erro" && a.ativo) {
+    b.hidden = false;
+    b.classList.add("erro");
+    b.textContent = "atualização com problema";
+    b.title = `${a.erro || ""}\n\nClique para ver em Ajustes.`;
+    b.onclick = () => ajustes?.abrir("geral");
   } else {
     b.hidden = true;
   }
@@ -316,6 +322,7 @@ function tratar(m) {
     }
   } else if (m.tipo === "atualizacao") {
     mostrarAtualizacao(m);
+    ajustes?.geral.mostrarAtualizacao(m); // a área de atualização nos Ajustes acompanha ao vivo
   } else if (m.tipo === "aviso") {
     avisar({ texto: m.texto, cor: "#38d6f5", tempo: 7000 });
   } else if (m.tipo === "evento") {

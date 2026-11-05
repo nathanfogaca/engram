@@ -1118,3 +1118,19 @@ textarea#sql:focus { border-color: rgb(var(--acento1) / .6); box-shadow: 0 0 0 4
 :root[data-tema="claro"] .tag.modelo, :root[data-tema="claro"] .aj-ag, :root[data-tema="claro"] .estado { color: color-mix(in srgb, var(--cor, var(--c, #6d5dfc)) 50%, #0b1220); }
 :root[data-tema="claro"] .tag.maestro { color: #8a5a00; background: rgba(245, 196, 81, .22); border-color: rgba(180, 120, 0, .45); }
 :root[data-tema="claro"] .aj-chip.ativo { color: #0b1220; }
+
+/* área de atualização nos Ajustes */
+.aj-atualizacao { display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px; background: rgb(var(--poco) / .2); border: 1px solid var(--borda); }
+.aj-versao { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.aj-versao b { font: 700 15px var(--sans); }
+.aj-situacao { display: inline-flex; align-items: center; gap: 8px; color: var(--discreto); font-size: 13.5px; }
+.aj-situacao i { font-style: normal; font-weight: 700; }
+.estado-em-dia .aj-situacao i { color: var(--verde); text-shadow: 0 0 10px var(--verde); }
+.estado-pronta .aj-situacao { color: var(--texto); }
+.estado-pronta .aj-situacao i { color: var(--ambar); text-shadow: 0 0 10px var(--ambar); }
+.estado-erro { border-color: rgb(255 107 125 / .45); }
+.estado-erro .aj-situacao { color: #ffc2ca; }
+.estado-erro .aj-situacao i { color: var(--perigo); }
+.aj-barra-progresso { height: 6px; border-radius: 999px; background: rgb(var(--tinta) / .08); overflow: hidden; }
+.aj-barra-progresso i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--violeta), var(--ciano)); box-shadow: 0 0 12px var(--ciano); transition: width .4s var(--suave); }
+.atualizacao.erro { color: #ffc2ca; border-color: rgb(255 107 125 / .45); background: rgb(255 107 125 / .1); }

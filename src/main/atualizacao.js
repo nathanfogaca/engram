@@ -6,6 +6,18 @@
 const { app } = require('electron');
 const { autoUpdater } = require('electron-updater');
 
+// De onde vêm as versões. Fica fixo aqui (e não só no app-update.yml do instalador) para que um
+// instalador montado sem o repositório certo nunca fique sem atualização. "atualizacao_repo" troca.
+const REPO_PADRAO = 'nathanfogaca/engram';
+
+function erroClaro(e) {
+  const t = String(e?.message || e || '');
+  if (/\b404\b/.test(t)) return 'não achei as versões no GitHub (o endereço de atualização está errado)';
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|ECONNRESET|net::ERR_/i.test(t)) return 'sem conexão com o GitHub agora';
+  if (/sha512|checksum/i.test(t)) return 'o arquivo baixado não bateu com a assinatura (SHA-512); ele foi descartado';
+  return t.split('\n')[0].slice(0, 200);
+}
+
 class Atualizador {
   constructor({ cfg, registrar, avisar, janela, aoInstalar }) {
     this.cfg = cfg;
@@ -13,9 +25,9 @@ class Atualizador {
     this.avisar = avisar;
     this.janela = janela; // função que devolve a BrowserWindow atual
     this.aoInstalar = aoInstalar;
-    this.estado = { estado: 'parado', versao_atual: app.getVersion(), versao_nova: null, progresso: 0, erro: null, notas: null };
-    this.semFocoDesde = null;
     this.ativo = app.isPackaged;
+    this.estado = { estado: 'parado', versao_atual: app.getVersion(), versao_nova: null, progresso: 0, erro: null, notas: null, conferido_em: null, ativo: this.ativo };
+    this.semFocoDesde = null;
   }
 
   mudar(parcial) {
@@ -30,15 +42,19 @@ class Atualizador {
     u.autoInstallOnAppQuit = true; // se a pessoa sair pelo menu, instala na saída
     u.logger = { info: m => this.registrar(`atualização: ${m}`), warn: m => this.registrar(`atualização: ${m}`), error: m => this.registrar(`atualização (erro): ${m}`), debug: () => {} };
     if (this.cfg.atualizacao_url) u.setFeedURL({ provider: 'generic', url: this.cfg.atualizacao_url });
+    else {
+      const [owner, repo] = String(this.cfg.atualizacao_repo || REPO_PADRAO).split('/');
+      u.setFeedURL({ provider: 'github', owner, repo, releaseType: 'release' });
+    }
     u.on('checking-for-update', () => this.mudar({ estado: 'verificando', erro: null }));
-    u.on('update-not-available', () => this.mudar({ estado: 'em dia' }));
+    u.on('update-not-available', () => this.mudar({ estado: 'em dia', conferido_em: new Date().toISOString() }));
     u.on('update-available', info => this.mudar({ estado: 'baixando', versao_nova: info.version, progresso: 0, notas: notas(info) }));
     u.on('download-progress', p => this.mudar({ estado: 'baixando', progresso: Math.round(p.percent || 0) }));
     u.on('update-downloaded', info => {
       this.mudar({ estado: 'pronta', versao_nova: info.version, progresso: 100, notas: notas(info) });
       this.registrar(`atualização ${info.version} baixada e conferida`);
     });
-    u.on('error', e => this.mudar({ estado: 'erro', erro: String(e?.message || e).split('\n')[0] }));
+    u.on('error', e => this.mudar({ estado: 'erro', erro: erroClaro(e), conferido_em: new Date().toISOString() }));
 
     setTimeout(() => this.verificar(), (this.cfg.atualizacao_primeira_s ?? 15) * 1000);
     setInterval(() => this.verificar(), Math.max(10, this.cfg.atualizacao_intervalo_min ?? 120) * 60_000);
@@ -48,7 +64,7 @@ class Atualizador {
 
   async verificar() {
     if (!this.ativo || ['baixando', 'pronta', 'instalando'].includes(this.estado.estado)) return this.estado;
-    try { await autoUpdater.checkForUpdates(); } catch (e) { this.mudar({ estado: 'erro', erro: String(e.message || e).split('\n')[0] }); }
+    try { await autoUpdater.checkForUpdates(); } catch (e) { this.mudar({ estado: 'erro', erro: erroClaro(e), conferido_em: new Date().toISOString() }); }
     return this.estado;
   }
 

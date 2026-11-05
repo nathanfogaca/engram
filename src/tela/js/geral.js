@@ -45,7 +45,46 @@ export class PainelAparencia {
 }
 
 export class PainelGeral {
-  constructor(raiz, { aoReiniciar }) { this.raiz = raiz; this.aoReiniciar = aoReiniciar; }
+  constructor(raiz, { aoReiniciar }) { this.raiz = raiz; this.aoReiniciar = aoReiniciar; this.atual = null; }
+
+  /** Versão, situação da atualização e o botão de procurar agora. */
+  blocoAtualizacao() {
+    this.caixaAtualizacao = el("div", { class: "aj-atualizacao" });
+    api("/api/atualizacao").then(a => this.mostrarAtualizacao(a)).catch(() => {});
+    return this.caixaAtualizacao;
+  }
+
+  mostrarAtualizacao(a) {
+    this.atual = a;
+    const caixa = this.caixaAtualizacao;
+    if (!caixa || !caixa.isConnected) return;
+    const hora = iso => iso ? new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+    const textos = {
+      parado: ["◌", "Ainda não conferiu desde que abriu."],
+      verificando: ["giro", "Procurando versão nova no GitHub…"],
+      "em dia": ["✓", `Você está na versão mais nova${a.conferido_em ? ` (conferido às ${hora(a.conferido_em)})` : ""}.`],
+      baixando: ["giro", `Baixando a ${a.versao_nova}… ${a.progresso || 0}%`],
+      pronta: ["★", `A ${a.versao_nova} está baixada e conferida. Os agentes continuam rodando durante a instalação.`],
+      instalando: ["giro", `Instalando a ${a.versao_nova}…`],
+      erro: ["✕", `Não deu para conferir: ${a.erro || "erro desconhecido"}.`],
+    };
+    const [icone, texto] = !a.ativo ? ["◌", "Em modo de desenvolvimento a atualização automática fica desligada; ela funciona no app instalado."] : textos[a.estado] || textos.parado;
+    const ocupado = ["verificando", "baixando", "instalando"].includes(a.estado);
+    const procurar = el("button", { type: "button", class: "btn pequeno", disabled: !a.ativo || ocupado, onclick: async () => {
+      procurar.disabled = true;
+      try { this.mostrarAtualizacao(await api("/api/atualizacao/verificar", { method: "POST" })); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); }
+    } }, "Procurar atualização agora");
+    const instalar = a.estado === "pronta" ? el("button", { type: "button", class: "btn-brilho pequeno", onclick: async () => {
+      try { await api("/api/atualizacao/instalar", { method: "POST" }); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); }
+    } }, el("span", { text: `Instalar a ${a.versao_nova} agora` })) : null;
+    caixa.className = `aj-atualizacao estado-${a.ativo ? String(a.estado).replace(" ", "-") : "dev"}`;
+    caixa.replaceChildren(...[
+      el("div", { class: "aj-versao" }, el("b", { text: `Engram ${a.versao_atual}` }),
+        el("span", { class: "aj-situacao" }, icone === "giro" ? el("span", { class: "giro" }) : el("i", { text: icone }), texto)),
+      a.estado === "baixando" ? el("div", { class: "aj-barra-progresso" }, el("i", { style: { width: `${a.progresso || 0}%` } })) : null,
+      el("div", { class: "aj-acoes" }, procurar, instalar),
+    ].filter(Boolean)); // replaceChildren escreveria "null" no lugar do que não existe
+  }
 
   async carregar() {
     try { this.c = await api("/api/config"); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); return; }
@@ -106,9 +145,9 @@ export class PainelGeral {
       el("section", { class: "aj-grupo" }, el("h3", { text: "Limites" }),
         el("div", { class: "aj-campos tres" }, campo("Janelas abertas ao mesmo tempo", maxJ), campo("Mensagens entre dois agentes a cada 10 min", maxM, "Trava contra dois agentes respondendo um ao outro em loop."), campo("Tamanho máximo de arquivo (MB)", maxA))),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Contexto para todos os agentes" }), el("div", { class: "aj-campo" }, contexto)),
-      el("section", { class: "aj-grupo" }, el("h3", { text: "Atualização" }),
+      el("section", { class: "aj-grupo" }, el("h3", { text: "Atualização" }), this.blocoAtualizacao(),
         el("label", { class: "aj-opcao" }, (() => { const i = el("input", { type: "checkbox", checked: atualizar, onchange: e => { atualizar = e.target.checked; } }); return el("span", { class: "chave" }, i, el("span")); })(),
-          el("span", {}, "Instalar atualizações sozinho ", el("small", { text: `(quando a janela não está em uso · versão ${c.versao})` })))),
+          el("span", {}, "Instalar atualizações sozinho ", el("small", { text: "(quando a janela não está em uso)" })))),
       el("div", { class: "aj-acoes rodape-geral" },
         el("small", { class: "aj-nota", text: `Dados do Engram: ${c.dados}` }), el("span", { class: "empurra" }),
         el("button", { type: "button", class: "btn pequeno aj-reiniciar", hidden: true, onclick: () => this.aoReiniciar?.() }, "Reiniciar agora"),
