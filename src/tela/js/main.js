@@ -14,8 +14,9 @@ import { aplicarTema } from "./geral.js";
 import { PrimeiroUso } from "./primeiro-uso.js";
 import { VistaCodigo } from "./codigo.js";
 import { VistaFluxos } from "./fluxos.js";
+import { PainelPrevia, temPrevia } from "./previa.js";
 
-let palco, cerebro, gaveta, leitor, contas, ajustes, codigo, fluxos;
+let palco, cerebro, gaveta, leitor, contas, ajustes, codigo, fluxos, previa;
 let idsNotas = new Set();
 let contagemTipos = {};
 
@@ -314,6 +315,10 @@ function atualizarProvedores(dados) {
 function tratar(m) {
   if (m.tipo === "codigo") {
     codigo?.aoVivo(m);
+  } else if (m.tipo === "previa") {
+    previa?.aoVivo(m);
+  } else if (m.tipo === "lsp") {
+    codigo?.lsp?.aoVivo(m);
   } else if (m.tipo === "fluxos") {
     fluxos?.aoVivo(m);
   } else if (m.tipo === "mcps") {
@@ -331,6 +336,9 @@ function tratar(m) {
     for (const nomeArq of m.entregues || []) {
       avisar({ rota: `${c?.info.nome || "agente"} te devolveu`, texto: nomeArq, cor: c?.cor || "#8b7bff", tempo: 8000 });
     }
+    // como no Claude: o que tem prévia (página, imagem, vídeo, PDF...) abre sozinho no painel
+    const comPrevia = (m.entregues || []).filter(temPrevia);
+    if (comPrevia.length) previa?.abrir({ raiz: "a", sessao: m.sessao_id, qual: "entregues", nome: comPrevia[comPrevia.length - 1] }, { sozinha: true });
   } else if (m.tipo === "atualizacao") {
     mostrarAtualizacao(m);
     ajustes?.geral.mostrarAtualizacao(m); // a área de atualização nos Ajustes acompanha ao vivo
@@ -407,6 +415,7 @@ async function iniciar() {
   const abrirGaveta = gaveta.abrir.bind(gaveta);
   gaveta.abrir = () => { leitor?.fechar(); abrirGaveta(); }; // um painel lateral por vez
   palco = new Palco({ aoAbrirNota: abrirNota, aoRetomar: retomar, aoLer: abrirLeitor });
+  previa = new PainelPrevia();
   codigo = new VistaCodigo($("#codigo"), {
     agentes: () => [...palco.cartoes.values()].filter(c => c.viva).map(c => ({ id: c.info.id, nome: c.info.nome, estado: c.info.estado })),
   });

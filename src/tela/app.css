@@ -1151,3 +1151,10 @@ textarea#sql:focus { border-color: rgb(var(--acento1) / .6); box-shadow: 0 0 0 4
 .menu-fio button.revisar:hover { background: rgb(255 200 87 / .14); color: var(--ambar); }
 .menu-fio button.revisar.marcado { color: var(--ambar); }
 .menu-fio hr { border: 0; border-top: 1px solid var(--borda); margin: 4px 6px; }
+
+/* "Visualizar trabalho": o olho no cabeçalho do cartão (brilha quando o agente está mexendo) */
+.cab-btn.olho { display: inline-grid; place-items: center; }
+.cab-btn.olho .codicon { font-size: 15px; }
+.cab-btn.olho:hover { color: var(--ciano); background: rgb(var(--acento2) / .14); }
+.cartao.ocupado .cab-btn.olho { color: var(--ciano); animation: olho-brilha 1.6s ease-in-out infinite; }
+@keyframes olho-brilha { 50% { text-shadow: 0 0 10px var(--ciano); background: rgb(var(--acento2) / .12); } }

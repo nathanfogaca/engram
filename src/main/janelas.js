@@ -306,9 +306,27 @@ class Janelas {
 
   // ---------------------------------------------------------------- terminal
 
+  /** Um endereço local (http://localhost:5173...) apareceu na saída de um terminal: avisa a tela uma vez. */
+  detectarEnderecos(id, texto) {
+    this.caudas ||= new Map();
+    this.enderecosVistos ||= new Map();
+    // o código de controle vira espaço: o terminal posiciona o cursor em vez de quebrar a linha
+    const limpo = ((this.caudas.get(id) || '') + texto).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, ' ');
+    this.caudas.set(id, limpo.slice(-300));
+    const proprias = new Set([this.cfg.porta, this.cfg.motor_porta].map(String));
+    for (const m of limpo.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d{2,5})(?:\/[^\s\\"'<>)\]]*)?/g)) {
+      if (proprias.has(m[1])) continue;
+      const url = m[0].replace('0.0.0.0', 'localhost').replace(/[.,;:]+$/, '');
+      if (Date.now() - (this.enderecosVistos.get(url) || 0) < 10 * 60_000) continue;
+      this.enderecosVistos.set(url, Date.now());
+      this.avisar({ tipo: 'previa', evento: 'servidor', url, sessao: id });
+    }
+  }
+
   motorSaida(id, texto) {
     const j = this.janela(id);
     if (!j) return;
+    if (texto.includes('://')) try { this.detectarEnderecos(id, texto); } catch { /* segue */ }
     j.guardar(texto);
     for (const cb of j.ouvintes) cb(texto);
   }
@@ -681,6 +699,7 @@ class Janelas {
       if (tipo === 'gravou' && rel) this.cerebro.sincronizarArquivo(rel).then(erro => this.avisar({ tipo: 'cerebro', mudou: rel, erro }));
     }
     this.avisar({ tipo: 'evento', sessao_id: id, evento, estado, ferramenta, resumo, toques: toques.map(([d, t]) => ({ destino: d, tipo: t })) });
+    try { this.aoEvento?.(id, evento, ferramenta, entrada); } catch { /* quem acompanha não atrapalha o agente */ }
     if (evento === 'SessionStart') this.tentarEntregar(j, 2000); // a tela do agente ainda está montando
     else if (evento === 'Stop' || evento === 'Notification') this.tentarEntregar(j, 600);
   }

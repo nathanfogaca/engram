@@ -4,6 +4,8 @@
 // arquivo aberto, o editor recarrega sozinho. Veio do Orbion (Lucas Lessa), que passou a fazer parte do Engram.
 
 import { $, el, api, avisar } from "./util.js";
+import { temPrevia } from "./previa.js";
+import { ClienteLsp } from "./lsp.js";
 import { ext, PainelExtensoes, definirTemaEditor, temaTerminalVscode, pintarVista, iconeDoTema, linguagemPelasExtensoes } from "./extensoes.js";
 
 const ic = (nome, extra = "") => el("i", { class: `codicon codicon-${nome} ${extra}`.trim() });
@@ -24,7 +26,7 @@ const ICONES = [
   [/\.(txt|log)$/i, "file-text", "#a3b1c6"], [/^\.(gitignore|gitattributes|env.*|editorconfig)$/i, "gear", "#8a95aa"],
   [/\.(cs|java|go|rs|rb|php|c|cpp|h|kt|swift|vb)$/i, "file-code", "#7ee0c3"], [/\.(exe|dll|bin)$/i, "file-binary", "#8a95aa"],
 ];
-function iconeDe(nome, { pasta = false, aberta = false } = {}) {
+export function iconeDe(nome, { pasta = false, aberta = false } = {}) {
   const claro = ext.temaCores ? ext.temaCores.tipo === "claro" : document.documentElement.dataset.tema === "claro";
   const doTema = iconeDoTema(nome, { pasta, aberta, claro });
   if (doTema) return doTema;
@@ -41,7 +43,7 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 // ------------------------------------------------------------------ Monaco (carrega só quando a vista abre)
 
 let monacoPronto = null;
-function carregarMonaco() {
+export function carregarMonaco() {
   if (monacoPronto) return monacoPronto;
   monacoPronto = new Promise((resolve, reject) => {
     const s = document.createElement("script");
@@ -72,7 +74,7 @@ function corHex(cor) {
 }
 
 /** As cores do editor pelo tema do Engram (quando não há tema do VS Code escolhido). */
-function coresDoEngram() {
+export function coresDoEngram() {
   const cs = getComputedStyle(document.documentElement);
   const tema = document.documentElement.dataset.tema || "aurora";
   const v = n => cs.getPropertyValue(n).trim();
@@ -125,6 +127,7 @@ export class VistaCodigo {
     this.montado = false;
     this.atualizarGit = debounce(() => this.carregarGit(), 400);
     this.ext = new PainelExtensoes(this);
+    this.lsp = new ClienteLsp(this);
   }
 
   // ---------------------------------------------------------------- montar e ligar
@@ -143,6 +146,7 @@ export class VistaCodigo {
       this.criarEditores();
       await this.ext.iniciar(window.monaco);
       this.aplicarTemas();
+      this.lsp.ligar(window.monaco).catch(e => console.warn("servidores de linguagem:", e));
     } catch (e) { erro(e); }
     await this.abrirProjeto();
   }
@@ -396,6 +400,7 @@ export class VistaCodigo {
     const onde = item.pasta ? item.rel : pastaDe(item.rel);
     this.abrirMenu(e, [
       !item.pasta && ["go-to-file", "Abrir", () => this.abrirArquivo(item.rel)],
+      !item.pasta && temPrevia(item.nome) && ["preview", "Abrir a prévia", () => this.previa(item.rel)],
       !item.pasta && this.git?.arquivos?.[item.rel] && ["git-compare", "Ver mudanças", () => this.abrirDiff(item.rel)],
       ["new-file", "Novo arquivo aqui", () => this.novoItem(false, onde)],
       ["new-folder", "Nova pasta aqui", () => this.novoItem(true, onde)],
@@ -558,7 +563,8 @@ export class VistaCodigo {
     const partes = a.rel.split("/");
     box.replaceChildren(...[...partes.flatMap((p, i) => [i ? ic("chevron-right", "cod-migalha-sep") : null,
       el("span", { class: "cod-migalha" }, i === partes.length - 1 ? iconeDe(p) : null, p)]),
-    a.tipo === "diff" ? el("span", { class: "cod-migalha-acoes" }, el("button", { class: "cod-bt-mini", onclick: () => this.abrirArquivo(a.rel) }, ic("go-to-file"), " Abrir o arquivo")) : null].filter(Boolean));
+    a.tipo === "diff" ? el("span", { class: "cod-migalha-acoes" }, el("button", { class: "cod-bt-mini", onclick: () => this.abrirArquivo(a.rel) }, ic("go-to-file"), " Abrir o arquivo")) : null,
+    a.tipo === "arquivo" && temPrevia(a.rel) ? el("span", { class: "cod-migalha-acoes" }, el("button", { class: "cod-bt-mini cod-bt-previa", title: "Ver o resultado ao lado (atualiza ao salvar)", onclick: () => this.previa(a.rel) }, ic("preview"), " Prévia")) : null].filter(Boolean));
   }
 
   linguagem(nome) {
@@ -628,6 +634,8 @@ export class VistaCodigo {
     this.abrirAba({ id, tipo: "pagina", titulo, icone, desenhar });
   }
 
+  previa(rel) { window.dispatchEvent(new CustomEvent("engram:previa", { detail: { raiz: "p", rel } })); }
+
   redesenharPagina() { const a = this.abaAtiva(); if (a?.tipo === "pagina") a.desenhar($("#cod-host-pagina")); }
 
   /** O tema de cores (do VS Code ou do Engram) no editor, no terminal e na vista inteira. */
@@ -638,6 +646,8 @@ export class VistaCodigo {
     for (const t of this.terminais) t.term.options.theme = vs ? { ...temaTerminal(), ...vs } : temaTerminal();
     this.redesenharIcones();
   }
+
+  redesenharExtensoes() { if (this.lado === "extensoes") this.desenharLado(); }
 
   redesenharIcones() { this.desenharLado(); this.desenharAbas(); this.desenharMigalhas(); }
 
@@ -1051,8 +1061,19 @@ export class VistaCodigo {
       g ? el("span", { class: "cod-status-item" }, ic("diff"), String(Object.keys(g.arquivos || {}).length)) : null,
       el("span", { class: "cod-empurra" }),
       a?.tipo === "arquivo" && this.cursor ? el("span", { class: "cod-status-item", text: `Ln ${this.cursor.linha}, Col ${this.cursor.coluna}` }) : null,
+      (() => {
+        // problemas que o servidor de linguagem achou, e o estado dele
+        const lsp = idLang && this.lsp?.estadoPara(idLang);
+        if (!lsp || a?.tipo !== "arquivo") return null;
+        const marcas = window.monaco?.editor.getModelMarkers({ resource: a.modelo.uri, owner: "lsp" }) || [];
+        const erros = marcas.filter(x => x.severity === 8).length, avisos = marcas.length - erros;
+        return el("button", { class: `cod-status-item lsp-status ${lsp.estado}`, title: `${lsp.nome}: ${lsp.estado}. Clique para ver em Extensões.`, onclick: () => this.trocarLado("extensoes") },
+          ic(lsp.estado === "rodando" ? "pass" : lsp.estado === "erro" ? "error" : "loading", lsp.estado === "iniciando" ? "codicon-modifier-spin" : ""),
+          lsp.nome.split(" ")[0], marcas.length ? el("span", { class: "lsp-contagem", text: ` ${erros ? `${erros} erro${erros > 1 ? "s" : ""}` : ""}${erros && avisos ? ", " : ""}${avisos ? `${avisos} aviso${avisos > 1 ? "s" : ""}` : ""}` }) : null);
+      })(),
       lang ? el("button", { class: "cod-status-item", title: "Mudar a linguagem do arquivo", onclick: () => this.escolherLinguagem(), text: lang }) : null,
       this.info ? el("button", { class: "cod-status-item", title: this.info.raiz, onclick: e => this.menuPastas(e.currentTarget) }, ic("folder"), this.info.nome) : null,
+      el("button", { class: "cod-status-item", title: "Navegador do Engram: o site rodando no seu computador (localhost)", onclick: () => window.dispatchEvent(new CustomEvent("engram:navegador")) }, ic("browser")),
       el("button", { class: "cod-status-item", title: "Terminal (Ctrl+')", onclick: () => this.alternarPainel() }, ic("terminal"))].filter(Boolean));
   }
 
@@ -1160,6 +1181,8 @@ export class VistaCodigo {
       ["Git: criar branch…", "add", () => this.criarRamo()],
       ["Mandar o arquivo aberto para um agente…", "sparkle", () => this.abaAtiva()?.rel && this.mandarParaAgente(this.abaAtiva().rel)],
       ["Recarregar os arquivos", "refresh", () => this.recarregarArvore()],
+      ["Abrir o navegador do Engram (localhost)…", "browser", () => window.dispatchEvent(new CustomEvent("engram:navegador"))],
+      ["Abrir a prévia do arquivo aberto", "preview", () => this.abaAtiva()?.rel && temPrevia(this.abaAtiva().rel) && this.previa(this.abaAtiva().rel)],
       ["Tema de cores…", "symbol-color", () => this.ext.escolherTemaCores(), "Ctrl K Ctrl T"],
       ["Tema de ícones…", "file-media", () => this.ext.escolherTemaIcones()],
       ["Extensões: procurar na loja", "extensions", () => this.trocarLado("extensoes"), "Ctrl Shift X"],

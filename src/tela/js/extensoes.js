@@ -543,6 +543,7 @@ export class PainelExtensoes {
     const l = this.lista;
     const grupos = [["engram", "Instaladas no Engram"], ["vscode", "Do seu VS Code"], ["cursor", "Do seu Cursor"], ["vscodium", "Do seu VSCodium"], ["embutida", "Embutidas no VS Code"]];
     return [
+      this.vista.lsp?.desenharCartoes(),
       l.temVscode ? el("label", { class: "ext-opcao", title: "Usa as gramáticas, linguagens e snippets que vêm com o VS Code instalado: o código fica com as mesmas cores do VS Code" },
         (() => { const i = el("input", { type: "checkbox", ...(l.realceVscode ? { checked: true } : {}), onchange: async e => { await api("/api/extensoes/ajustar", { json: { codigo_realce_vscode: e.target.checked } }).catch(erro); await this.aposMudar(); this.vista.retokenizar(); this.vista.desenharLado(); } }); return el("span", { class: "chave" }, i, el("span")); })(),
         el("span", {}, "Realce de sintaxe do VS Code instalado")) : null,

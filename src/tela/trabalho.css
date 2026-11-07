@@ -1,0 +1,91 @@
+/* Janela "Visualizar trabalho": o agente escrevendo código, ao vivo. */
+
+body.pagina-trabalho { margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--texto); font-family: var(--sans); }
+#trab { position: fixed; inset: 0; display: grid; grid-template-rows: 48px 1fr 34px; gap: 8px; padding: 0 10px 10px; z-index: 2; }
+.pagina-trabalho .codicon { font-size: 15px; line-height: 1; }
+.trab-erro { padding: 40px; color: var(--perigo); }
+
+/* topo (arrasta a janela; os controles do Windows ficam à direita) */
+.trab-topo { display: flex; align-items: center; gap: 10px; padding: 0 150px 0 4px; -webkit-app-region: drag; }
+.trab-topo > * { -webkit-app-region: no-drag; }
+.trab-olho { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 10px; background: linear-gradient(135deg, var(--cor, var(--violeta)), var(--ciano)); box-shadow: 0 0 18px color-mix(in srgb, var(--cor, var(--violeta)) 55%, transparent); }
+.trab-olho .codicon { color: #fff; font-size: 17px; }
+body.ocupado .trab-olho { animation: trab-respira 1.8s ease-in-out infinite; }
+@keyframes trab-respira { 50% { box-shadow: 0 0 34px var(--cor, var(--violeta)); transform: scale(1.05); } }
+.trab-titulos { display: grid; min-width: 0; }
+.trab-titulos b { font: 700 14px var(--sans); color: var(--texto-forte); white-space: nowrap; }
+.trab-titulos small { color: var(--discreto); font: 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 52vw; }
+.trab-chip { padding: 2px 9px; border-radius: 9px; background: color-mix(in srgb, var(--cor, var(--violeta)) 18%, transparent); color: var(--cor, var(--violeta)); font: 600 11.5px var(--sans); white-space: nowrap; }
+.trab-estado { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 10px; background: rgb(var(--tinta) / .06); color: var(--discreto); font: 600 12px var(--sans); white-space: nowrap; }
+.trab-estado.trabalhando, .trab-estado.pensando { background: rgb(255 200 87 / .14); color: var(--ambar); }
+.trab-estado.esperando-você, .trab-estado.pronta { background: rgb(74 222 159 / .12); color: var(--verde); }
+.trab-estado.precisa-de-você { background: rgb(255 107 125 / .14); color: var(--perigo); }
+
+/* corpo: arquivos | editor | linha do tempo */
+.trab-corpo { display: grid; grid-template-columns: 250px minmax(0, 1fr) 300px; gap: 10px; min-height: 0; }
+.trab-lado, .trab-centro, .trab-tempo, .trab-rodape {
+  background: var(--vidro); border: 1px solid var(--borda); border-radius: var(--raio); backdrop-filter: blur(18px); box-shadow: 0 18px 50px rgb(0 0 0 / .28); min-width: 0; overflow: hidden;
+}
+.trab-lado, .trab-tempo { display: flex; flex-direction: column; }
+.trab-sec-titulo { padding: 12px 14px 6px; font: 700 10.5px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--discreto); flex: none; }
+.trab-arquivos, .trab-feed { flex: 1; overflow: auto; padding: 0 6px 8px; }
+.trab-dica { color: var(--apagado); font-size: 12.5px; padding: 4px 10px; margin: 0; }
+.trab-arq { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 1px solid transparent; border-radius: 9px; background: none; color: var(--texto); text-align: left; cursor: pointer; }
+.trab-arq:hover { background: rgb(var(--tinta) / .05); }
+.trab-arq.atual { background: rgb(var(--acento1) / .15); border-color: rgb(var(--acento1) / .35); }
+.trab-arq.escrevendo { border-color: rgb(var(--acento2) / .6); box-shadow: 0 0 14px rgb(var(--acento2) / .25); }
+.trab-arq.escrevendo .cod-ic { animation: trab-piscar .9s ease-in-out infinite; }
+@keyframes trab-piscar { 50% { opacity: .35; } }
+.trab-arq-nome { flex: 1; min-width: 0; display: grid; }
+.trab-arq-nome b { font: 600 12.5px var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trab-arq-nome small { color: var(--apagado); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trab-cont { display: inline-flex; gap: 4px; font: 600 11px var(--mono); }
+.trab-cont i { font-style: normal; } .trab-cont .mais { color: var(--verde); } .trab-cont .menos { color: var(--perigo); }
+
+.trab-centro { display: flex; flex-direction: column; }
+.trab-abas { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--borda); flex: none; }
+.trab-abas button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 8px; background: none; color: var(--discreto); font: 600 12.5px var(--sans); cursor: pointer; }
+.trab-abas button:hover { color: var(--texto); background: rgb(var(--tinta) / .05); }
+.trab-abas button.ativo { color: var(--texto-forte); background: rgb(var(--acento1) / .18); box-shadow: inset 0 0 0 1px rgb(var(--acento1) / .35); }
+.trab-arquivo-atual { display: inline-flex; align-items: center; gap: 6px; color: var(--discreto); font: 12px var(--mono); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 50%; }
+.trab-hosts { position: relative; flex: 1; min-height: 0; background: var(--codigo); }
+.trab-host { position: absolute; inset: 0; }
+.trab-host[hidden] { display: none; }
+.trab-term { padding: 8px 6px 4px 12px; background: #070a10; }
+.trab-vazio { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 10px; text-align: center; padding: 30px;
+  background: radial-gradient(500px 280px at 50% 42%, color-mix(in srgb, var(--cor, var(--violeta)) 14%, transparent), transparent 70%), var(--codigo); }
+.trab-vazio[hidden] { display: none; }
+.trab-vazio h2 { margin: 0; font: 700 20px var(--sans); color: var(--texto-forte); }
+.trab-vazio p { margin: 0; color: var(--discreto); max-width: 440px; line-height: 1.5; }
+.trab-vazio-olho { width: 78px; height: 78px; display: grid; place-items: center; border-radius: 24px; background: linear-gradient(135deg, var(--cor, var(--violeta)), var(--ciano)); box-shadow: 0 0 40px color-mix(in srgb, var(--cor, var(--violeta)) 50%, transparent); animation: trab-respira 2.4s ease-in-out infinite; }
+.trab-vazio-olho .codicon { font-size: 36px !important; color: #fff; }
+
+/* a escrita no editor */
+.trab-linha-entra { background: rgb(74 222 159 / .13); box-shadow: inset 3px 0 0 #4ade9f; }
+.trab-linha-entra.fim { animation: trab-esmaece 9s ease-out forwards; }
+@keyframes trab-esmaece { 0%, 40% { background: rgb(74 222 159 / .13); } 100% { background: transparent; box-shadow: inset 3px 0 0 rgb(74 222 159 / .2); } }
+.trab-linha-sai { background: rgb(255 107 125 / .22); box-shadow: inset 3px 0 0 #ff6b7d; text-decoration: line-through; }
+.trab-cursor::before { content: ""; display: inline-block; width: 2px; height: 1.15em; margin-right: -2px; vertical-align: text-bottom; background: var(--ciano); box-shadow: 0 0 8px var(--ciano), 0 0 16px var(--ciano); animation: trab-cursor .5s steps(1) infinite; }
+@keyframes trab-cursor { 50% { opacity: .2; } }
+
+/* linha do tempo */
+.trab-item { display: flex; align-items: flex-start; gap: 9px; padding: 7px 8px; border-radius: 9px; }
+.trab-item.clicavel { cursor: pointer; }
+.trab-item.clicavel:hover { background: rgb(var(--tinta) / .05); }
+.trab-item.novo { animation: trab-chega .5s var(--mola); background: rgb(var(--acento2) / .08); }
+@keyframes trab-chega { from { opacity: 0; transform: translateY(-6px); } }
+.trab-item-icone { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 7px; background: rgb(var(--tinta) / .07); color: var(--ciano); }
+.trab-item-texto { flex: 1; min-width: 0; display: grid; }
+.trab-item-texto b { font: 500 12.5px var(--sans); overflow-wrap: anywhere; }
+.trab-item-texto small { color: var(--apagado); font-size: 11px; }
+.trab-item time { color: var(--apagado); font: 10.5px var(--mono); flex: none; }
+
+/* rodapé */
+.trab-rodape { display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 12px; color: var(--discreto); }
+.trab-opcao { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.trab-vel { display: inline-flex; padding: 2px; border-radius: 8px; background: rgb(var(--poco) / .3); border: 1px solid var(--borda); }
+.trab-vel button { height: 22px; padding: 0 9px; border: 0; border-radius: 6px; background: none; color: var(--discreto); font: 600 11.5px var(--sans); cursor: pointer; }
+.trab-vel button.ativo { background: rgb(var(--acento1) / .25); color: var(--texto-forte); }
+.trab-pasta { display: inline-flex; align-items: center; gap: 5px; max-width: 30%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 11.5px var(--mono); color: var(--apagado); }
+
+@media (max-width: 1050px) { .trab-corpo { grid-template-columns: 210px minmax(0, 1fr); } .trab-tempo { display: none; } }

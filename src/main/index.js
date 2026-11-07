@@ -25,6 +25,9 @@ const { Skills } = require('./skills');
 const { Codigo } = require('./codigo');
 const { Fluxos } = require('./fluxos');
 const { Extensoes } = require('./extensoes');
+const { Previa } = require('./previa');
+const { Linguagens } = require('./linguagens');
+const { Trabalho } = require('./trabalho');
 
 const TELA = path.resolve(__dirname, '..', 'tela');
 const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json', '.wasm': 'application/wasm', '.woff': 'font/woff', '.otf': 'font/otf' };
@@ -35,7 +38,7 @@ const PACOTES = {
   // o realce de sintaxe das extensões (gramáticas TextMate), o mesmo motor do VS Code
   'modulos/vscode-textmate/': path.join(MODULOS, 'vscode-textmate', 'release'), 'modulos/vscode-oniguruma/': path.join(MODULOS, 'vscode-oniguruma', 'release'),
 };
-const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' engram: data: blob: https://open-vsx.org https://openvsx.eclipsecontent.org; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'";
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' engram: data: blob: http://127.0.0.1:* https://open-vsx.org https://openvsx.eclipsecontent.org; media-src 'self' blob: http://127.0.0.1:*; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src http://127.0.0.1:*; form-action 'none'";
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'engram', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
@@ -45,7 +48,7 @@ let janela = null;
 let nucleo = null;
 
 function avisar(msg) {
-  if (janela && !janela.isDestroyed()) janela.webContents.send('aovivo', msg);
+  for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('aovivo', msg);
 }
 
 async function iniciarNucleo() {
@@ -73,6 +76,11 @@ async function iniciarNucleo() {
   const fluxos = new Fluxos({ codigo, janelas, provedores, avisar, cfg, registrar: config.registrar });
   janelas.fluxos = fluxos; // as ferramentas fluxo_* do time (MCP) falam com ele
   const extensoes = new Extensoes({ dados: c.dados, cfg, salvarConfig: config.salvar, avisar, registrar: config.registrar });
+  const previa = new Previa({ codigo, arquivos: janelas.arquivos, avisar, registrar: config.registrar });
+  try { await previa.iniciar(); } catch (e) { config.registrar(`prévias: o servidor local não abriu (${e.message})`); }
+  const linguagens = new Linguagens({ dados: c.dados, codigo, janelas, avisar, registrar: config.registrar, cfg, salvarConfig: config.salvar });
+  app.on('before-quit', () => linguagens.pararTudo());
+  const trabalho = new Trabalho({ janelas, avisar });
   const estadoSinc = { rodando: false, ultimo: null, erro: null };
 
   async function sincronizar(forcar = false) {
@@ -119,9 +127,14 @@ async function iniciarNucleo() {
     try { janela.setTitleBarOverlay({ color: t.fundo, symbolColor: t.simbolos, height: 40 }); } catch { /* sem barra */ }
   };
   definirTema(cfg.tema);
-  const rotas = criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes });
+  const rotas = criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, abrirTrabalho: sessao => abrirJanelaTrabalho(sessao, trabalho) });
   return { cfg, janelas, rotas, extensoes, arquivos: new Arquivos(c.arquivos) };
 }
+
+app.on('web-contents-created', (_e, wc) => {
+  if (wc.getType() !== 'webview') return;
+  wc.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+});
 
 function registrarProtocolo() {
   protocol.handle('engram', async req => {
@@ -192,7 +205,7 @@ function criarJanela() {
     icon: fs.existsSync(path.join(TELA, 'marca', 'engram.png')) ? path.join(TELA, 'marca', 'engram.png') : undefined,
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: temaInicial().fundo, symbolColor: temaInicial().simbolos, height: 40 },
-    webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
+    webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, plugins: true, webviewTag: true }, // plugins: o leitor de PDF; webviewTag: o navegador da prévia
   });
   janela.once('ready-to-show', () => janela.show());
   janela.webContents.setWindowOpenHandler(({ url }) => {
@@ -205,6 +218,13 @@ function criarJanela() {
     return { action: 'deny' };
   });
   janela.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('engram://app/')) e.preventDefault(); });
+  janela.webContents.on('will-attach-webview', (e, prefs, params) => {
+    // o navegador da prévia é uma página qualquer da web: nunca recebe o preload nem acesso ao app
+    delete prefs.preload;
+    Object.assign(prefs, { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, plugins: true });
+    params.partition = 'persist:engram-navegador';
+    if (!/^https?:\/\//i.test(params.src || '')) e.preventDefault();
+  });
   janela.loadURL('engram://app/index.html');
   // Fechar a janela só esconde: o Engram fica na bandeja (e os agentes, no motor).
   janela.on('close', e => {
@@ -217,6 +237,27 @@ function criarJanela() {
     }
   });
   janela.on('closed', () => { janela = null; });
+}
+
+// janelas de "Visualizar trabalho": uma por agente, que dá para pôr em outro monitor
+const janelasTrabalho = new Map();
+function abrirJanelaTrabalho(sessao, trabalho) {
+  const aberta = janelasTrabalho.get(sessao);
+  if (aberta && !aberta.isDestroyed()) { if (aberta.isMinimized()) aberta.restore(); aberta.show(); aberta.focus(); return; }
+  const t = temaInicial();
+  const w = new BrowserWindow({
+    width: 1280, height: 820, minWidth: 760, minHeight: 480, show: false, backgroundColor: t.fundo, title: 'Trabalho do agente',
+    icon: fs.existsSync(path.join(TELA, 'marca', 'engram.png')) ? path.join(TELA, 'marca', 'engram.png') : undefined,
+    titleBarStyle: 'hidden', titleBarOverlay: { color: t.fundo, symbolColor: t.simbolos, height: 40 },
+    webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
+  });
+  janelasTrabalho.set(sessao, w);
+  trabalho.assistir(sessao);
+  w.once('ready-to-show', () => w.show());
+  w.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  w.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('engram://app/')) e.preventDefault(); });
+  w.loadURL(`engram://app/trabalho.html?sessao=${encodeURIComponent(sessao)}`);
+  w.on('closed', () => { janelasTrabalho.delete(sessao); trabalho.soltar(sessao); });
 }
 
 let bandeja = null;

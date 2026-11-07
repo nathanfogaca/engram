@@ -236,6 +236,7 @@ export class Palco {
     c.btnConversa = el("button", { class: "ativo", text: "Conversa", title: "Texto legível (não gasta token)" });
     c.btnTerminal = el("button", { text: "Terminal", title: `O terminal de verdade do ${info.agente || "agente"}` });
     const btnLer = el("button", { class: "cab-btn", title: "Abrir no leitor grande", text: "⤢" });
+    const btnTrabalho = el("button", { class: "cab-btn olho", title: "Visualizar trabalho: ver o agente escrevendo o código, numa janela à parte" }, el("i", { class: "codicon codicon-eye" }));
     const btnFechar = el("button", { class: "cab-btn fechar", title: "Encerrar a janela", text: "×" });
     const cab = el("header", { class: "cab" },
       el("span", { class: "orbe" }), c.elNome,
@@ -244,7 +245,7 @@ export class Palco {
       el("span", { class: "tag modelo", text: info.nome_modelo || nomeModelo(info.modelo) }),
       c.elEstado,
       el("div", { class: "modos" }, c.btnConversa, c.btnTerminal),
-      btnLer, btnFechar);
+      btnTrabalho, btnLer, btnFechar);
     c.conv = new Conversa(info.id, { cor, nome: info.nome, aoTerminal: () => this.modo(c, "terminal") });
     c.elTerm = el("div", { class: "term", hidden: true });
     c.elAcao = el("span", { class: "acao" });
@@ -274,6 +275,7 @@ export class Palco {
     c.btnConversa.onclick = () => this.modo(c, "conversa");
     c.btnTerminal.onclick = () => this.modo(c, "terminal");
     btnLer.onclick = () => this.aoLer?.(c.id);
+    btnTrabalho.onclick = () => api("/api/trabalho/abrir", { json: { sessao: c.id } }).catch(e => avisar({ texto: e.message, cor: "#ff6b7d" }));
     btnFechar.onclick = () => this.encerrar(c);
     redim.addEventListener("pointerdown", e => {
       e.stopPropagation();

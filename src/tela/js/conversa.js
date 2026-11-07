@@ -2,6 +2,7 @@
 // (não gasta token), com a área de arquivos dele: o que a pessoa manda e o que o agente devolve.
 
 import { $, el, api, corModelo, nomeModelo, nomePapel, OCUPADO, ATENCAO, avisar, hora } from "./util.js";
+import { temPrevia } from "./previa.js";
 
 let _md = null;
 const md = () => (_md ||= window.markdownit({ html: false, linkify: true, breaks: false }));
@@ -170,6 +171,8 @@ export class Conversa {
       const url = `engram://arquivo/${this.id}/${qual}/${encodeURIComponent(a.nome)}`;
       return el("a", {
         class: `conv-arq-item${novos.includes(a.nome) ? " novo" : ""}`, href: url, target: "_blank", rel: "noopener",
+        // com prévia (página, imagem, vídeo, PDF...): abre no painel; Ctrl+clique abre no programa padrão
+        onclick: e => { if (temPrevia(a.nome) && !e.ctrlKey && !e.metaKey) { e.preventDefault(); window.dispatchEvent(new CustomEvent("engram:previa", { detail: { raiz: "a", sessao: this.id, qual, nome: a.nome } })); } },
         title: `${a.nome} · ${tamanhoLegivel(a.tamanho)} · ${hora(a.quando)}`,
       },
         ehImagem(a.nome) ? el("img", { src: url, alt: "", loading: "lazy" }) : el("span", { class: "conv-arq-icone", text: icone(a.nome) }),

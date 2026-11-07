@@ -306,3 +306,18 @@ button.cod-status-item:hover { background: rgb(var(--tinta) / .08); color: var(-
 #codigo.tema-vscode .cod-lado, #codigo.tema-vscode .cod-editor-caixa, #codigo.tema-vscode .cod-painel, #codigo.tema-vscode .cod-status { backdrop-filter: none; }
 #codigo.tema-vscode .cod-abas { background: var(--vidro); }
 .ext-img-carregando { min-width: 60px; min-height: 20px; background: rgb(var(--tinta) / .06); border-radius: 6px; }
+
+/* ------------------------------------------------ servidores de linguagem (LSP) */
+.lsp-secao { margin-bottom: 6px; }
+.lsp-cartao { display: flex; gap: 10px; padding: 9px 10px; margin: 0 6px 4px; border-radius: 11px; border: 1px solid var(--borda); background: rgb(var(--poco) / .16); }
+.lsp-cartao.ligado { border-color: rgb(var(--acento2) / .35); box-shadow: inset 0 0 18px rgb(var(--acento2) / .06); }
+.lsp-icone { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; background: linear-gradient(135deg, rgb(var(--acento2) / .3), rgb(var(--acento1) / .25)); }
+.lsp-icone .codicon { color: #fff; font-size: 17px !important; }
+.lsp-estado { margin-left: auto; padding: 0 7px; border-radius: 8px; font-size: 10.5px; background: rgb(var(--tinta) / .07); color: var(--discreto); }
+.lsp-estado.rodando { background: rgb(74 222 159 / .14); color: var(--verde); }
+.lsp-estado.iniciando { background: rgb(255 200 87 / .14); color: var(--ambar); }
+.lsp-estado.erro { background: rgb(255 107 125 / .14); color: var(--perigo); }
+.lsp-acoes { margin-left: auto; display: inline-flex; gap: 1px; }
+.lsp-status.rodando .codicon { color: var(--verde); }
+.lsp-status.erro .codicon { color: var(--perigo); }
+.lsp-contagem { color: var(--ambar); }

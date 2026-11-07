@@ -6,7 +6,7 @@ class ErroRota extends Error {
   constructor(status, mensagem) { super(mensagem); this.status = status; }
 }
 
-function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes }) {
+function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, abrirTrabalho }) {
   const importador = require('./importar');
   const rotas = [];
   const rota = (metodo, padrao, fn) => {
@@ -264,6 +264,9 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
   codigo?.registrarRotas(rota); // vista Código: arquivos, git e terminais da pasta aberta
   fluxos?.registrarRotas(rota); // vista Fluxos: o mapa do projeto em blocos, estilo n8n
   extensoes?.registrarRotas(rota); // extensões do VS Code (Open VSX): temas, ícones, realce e snippets
+  previa?.registrarRotas(rota, { shell: require('electron').shell }); // prévias de HTML, imagens, vídeo, PDF...
+  linguagens?.registrarRotas(rota); // servidores de linguagem (LSP): o IntelliSense de verdade no editor
+  trabalho?.registrarRotas(rota, { abrirJanela: abrirTrabalho }); // "Visualizar trabalho": ver o agente escrevendo
 
   return async function tratar(metodo, caminho, corpo) {
     const url = new URL(caminho, 'engram://app');
