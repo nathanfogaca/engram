@@ -12,8 +12,10 @@ import { Contas, COR_AGENTE } from "./contas.js";
 import { Ajustes } from "./ajustes.js";
 import { aplicarTema } from "./geral.js";
 import { PrimeiroUso } from "./primeiro-uso.js";
+import { VistaCodigo } from "./codigo.js";
+import { VistaFluxos } from "./fluxos.js";
 
-let palco, cerebro, gaveta, leitor, contas, ajustes;
+let palco, cerebro, gaveta, leitor, contas, ajustes, codigo, fluxos;
 let idsNotas = new Set();
 let contagemTipos = {};
 
@@ -24,6 +26,10 @@ function trocarVista(vista) {
   app.vista = vista;
   $("#palco").classList.toggle("oculta", vista !== "palco");
   $("#cerebro").classList.toggle("oculta", vista !== "cerebro");
+  $("#codigo").classList.toggle("oculta", vista !== "codigo");
+  $("#fluxos").classList.toggle("oculta", vista !== "fluxos");
+  if (vista === "codigo") codigo.ligar();
+  if (vista === "fluxos") fluxos.ligar();
   for (const b of $$("#seg button")) b.classList.toggle("ativo", b.dataset.vista === vista);
   moverPilula();
   if (vista === "cerebro") cerebro.ligar();
@@ -306,7 +312,11 @@ function atualizarProvedores(dados) {
 }
 
 function tratar(m) {
-  if (m.tipo === "mcps") {
+  if (m.tipo === "codigo") {
+    codigo?.aoVivo(m);
+  } else if (m.tipo === "fluxos") {
+    fluxos?.aoVivo(m);
+  } else if (m.tipo === "mcps") {
     api("/api/estado").then(e => { app.mcps = e.mcps || []; }).catch(() => {});
   } else if (m.tipo === "contas") {
     api("/api/contas").then(atualizarProvedores).catch(() => {});
@@ -355,6 +365,7 @@ function tratar(m) {
     if (gaveta.aba === "time" && gaveta.aberta) gaveta.time();
   } else if (m.tipo === "conexao") {
     if (m.acao === "criada") palco.ligar(m.a, m.b, { nascendo: true });
+    else if (m.acao === "revisao") palco.marcarRevisao(m.a, m.b, m.revisa);
     else palco.desligarLocal(m.a, m.b);
   } else if (m.tipo === "mensagem") {
     palco.mensagem(m.de, m.para, m.fase);
@@ -396,6 +407,14 @@ async function iniciar() {
   const abrirGaveta = gaveta.abrir.bind(gaveta);
   gaveta.abrir = () => { leitor?.fechar(); abrirGaveta(); }; // um painel lateral por vez
   palco = new Palco({ aoAbrirNota: abrirNota, aoRetomar: retomar, aoLer: abrirLeitor });
+  codigo = new VistaCodigo($("#codigo"), {
+    agentes: () => [...palco.cartoes.values()].filter(c => c.viva).map(c => ({ id: c.info.id, nome: c.info.nome, estado: c.info.estado })),
+  });
+  fluxos = new VistaFluxos($("#fluxos"), {
+    agentes: () => [...palco.cartoes.values()].filter(c => c.viva).map(c => ({ id: c.info.id, nome: c.info.nome, estado: c.info.estado })),
+    corDe: id => palco.cartoes.get(id)?.cor || null,
+    abrirArquivo: rel => { trocarVista("codigo"); codigo.abrirDeFora(rel); },
+  });
   leitor = new Leitor({
     cartoes: () => palco.cartoes,
     aoTerminal: id => {
@@ -438,8 +457,10 @@ async function iniciar() {
   document.addEventListener("keydown", ev => {
     const foco = document.activeElement;
     const noTerminal = foco?.closest?.(".xterm");
-    const digitando = foco?.matches?.("input, textarea, select") || noTerminal;
-    if ((ev.ctrlKey && ev.key.toLowerCase() === "k" && !noTerminal) || (ev.key === "/" && !digitando)) {
+    const noEditor = foco?.closest?.(".monaco-editor"); // o editor da vista Código tem os atalhos dele (Ctrl+K…)
+    const digitando = foco?.matches?.("input, textarea, select") || noTerminal || noEditor || foco?.isContentEditable;
+    if (app.vista === "codigo" && !document.querySelector("dialog[open]") && codigo.tecla(ev)) return;
+    if ((ev.ctrlKey && ev.key.toLowerCase() === "k" && !noTerminal && !noEditor) || (ev.key === "/" && !digitando)) {
       ev.preventDefault();
       $("#busca").focus();
       $("#busca").select();
@@ -447,8 +468,8 @@ async function iniciar() {
       leitor.fechar();
     } else if (ev.key === "Escape" && !digitando && gaveta.aberta) {
       gaveta.fechar();
-    } else if (!digitando && !ev.ctrlKey && !ev.altKey && (ev.key === "1" || ev.key === "2")) {
-      trocarVista(ev.key === "1" ? "palco" : "cerebro");
+    } else if (!digitando && !ev.ctrlKey && !ev.altKey && ["1", "2", "3", "4"].includes(ev.key)) {
+      trocarVista({ 1: "palco", 2: "cerebro", 3: "codigo", 4: "fluxos" }[ev.key]);
     }
   });
   window.addEventListener("resize", moverPilula);

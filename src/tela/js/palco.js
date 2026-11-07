@@ -202,7 +202,7 @@ export class Palco {
       if (c) c.el.style.animationDelay = `${i * 90}ms`;
     });
     setTimeout(() => {
-      for (const { a, b } of conexoes) this.ligar(a, b, { nascendo: true });
+      for (const { a, b, revisa } of conexoes) { this.ligar(a, b, { nascendo: true }); if (revisa) this.marcarRevisao(a, b, revisa); }
     }, janelas.length * 90 + 350);
     if (janelas.length) this.enquadrar(false);
   }
@@ -500,9 +500,15 @@ export class Palco {
       linha: svg("path", { class: "linha", stroke: url }),
       fluxo: svg("path", { class: "fluxo" }),
       alvo: svg("path", { class: "alvo" }),
+      selo: svg("g", { class: "selo-revisao" }),
       g: svg("g", { class: `fio${nascendo && !movimentoReduzido ? " nascendo" : ""}` }),
+      revisa: null,
     };
-    f.g.append(f.halo, f.linha, f.fluxo, f.alvo);
+    const fundo = svg("rect", { x: -38, y: -11, width: 76, height: 22, rx: 11 });
+    const rotulo = svg("text", { x: 0, y: 4, "text-anchor": "middle" });
+    rotulo.textContent = "✓ revisão";
+    f.selo.append(fundo, rotulo);
+    f.g.append(f.halo, f.linha, f.fluxo, f.alvo, f.selo);
     this.gFios.append(f.g);
     f.alvo.addEventListener("click", e => this.menuFio(f, e));
     this.fios.set(k, f);
@@ -546,6 +552,23 @@ export class Palco {
     f.grad.setAttribute("x2", pb.x); f.grad.setAttribute("y2", pb.y);
     f.s1.setAttribute("stop-color", A.cor);
     f.s2.setAttribute("stop-color", B.cor);
+    if (f.revisa) {
+      // o selo fica perto de quem revisa
+      const total = f.linha.getTotalLength();
+      const p = f.linha.getPointAtLength(total * (f.revisa === f.b ? 0.72 : 0.28));
+      f.selo.setAttribute("transform", `translate(${p.x} ${p.y})`);
+    }
+  }
+
+  /** A ligação a-b passa a ter revisão (revisa = a ponta que revisa) ou deixa de ter (null). */
+  marcarRevisao(a, b, revisa) {
+    const f = this.fios.get(this.chave(a, b));
+    if (!f) return;
+    f.revisa = revisa || null;
+    f.g.classList.toggle("revisao", !!f.revisa);
+    // o fluxo corre na direção de quem revisa
+    f.g.classList.toggle("para-a", f.revisa === f.a);
+    this.desenharFio(f);
   }
 
   redesenharFios(id) {
@@ -604,15 +627,28 @@ export class Palco {
 
   menuFio(f, e) {
     const A = this.cartoes.get(f.a), B = this.cartoes.get(f.b);
+    const nA = A?.info.nome || "?", nB = B?.info.nome || "?";
     const menu = $("#menu-fio");
-    menu.replaceChildren(el("button", {
-      text: `Desligar ${A?.info.nome || "?"} ⟷ ${B?.info.nome || "?"}`,
-      onclick: async () => {
-        this.fecharMenu();
-        try { await api("/api/conexoes/remover", { json: { a: f.a, b: f.b } }); } catch { /* some na próxima carga */ }
-        this.desligarLocal(f.a, f.b);
-      },
-    }));
+    const revisao = async revisor => {
+      this.fecharMenu();
+      try { await api("/api/conexoes/revisao", { json: { a: f.a, b: f.b, revisor } }); } catch (err) { avisar({ texto: err.message, cor: "#ff6b7d" }); }
+    };
+    const opcao = (revisor, texto) => el("button", { class: `revisar${f.revisa === revisor ? " marcado" : ""}`, onclick: () => revisao(revisor) },
+      el("b", { text: f.revisa === revisor ? "✓ " : "" }), texto);
+    menu.replaceChildren(
+      el("small", { class: "menu-titulo", text: "Revisão das entregas" }),
+      opcao(f.b, `${nB} revisa o que ${nA} entrega`),
+      opcao(f.a, `${nA} revisa o que ${nB} entrega`),
+      f.revisa ? el("button", { class: "revisar", onclick: () => revisao(null) }, "Sem revisão") : null,
+      el("hr"),
+      el("button", {
+        text: `Desligar ${nA} ⟷ ${nB}`,
+        onclick: async () => {
+          this.fecharMenu();
+          try { await api("/api/conexoes/remover", { json: { a: f.a, b: f.b } }); } catch { /* some na próxima carga */ }
+          this.desligarLocal(f.a, f.b);
+        },
+      }));
     Object.assign(menu.style, { left: `${e.clientX + 6}px`, top: `${e.clientY + 6}px` });
     menu.hidden = false;
   }

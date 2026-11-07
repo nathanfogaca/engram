@@ -8,6 +8,9 @@
 <script src="js/tema-cedo.js"></script>
 <link rel="stylesheet" href="vendor/xterm.css">
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="codicons/codicon.css">
+<link rel="stylesheet" href="codigo.css">
+<link rel="stylesheet" href="fluxos.css">
 </head>
 <body>
 <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -35,6 +38,8 @@
     <span class="seg-pilula" aria-hidden="true"></span>
     <button data-vista="palco" class="ativo" role="tab">Palco</button>
     <button data-vista="cerebro" role="tab">Cérebro</button>
+    <button data-vista="codigo" role="tab" title="Arquivos, editor, git e terminal da pasta de trabalho">Código</button>
+    <button data-vista="fluxos" role="tab" title="O projeto em blocos ligados, estilo n8n">Fluxos</button>
   </nav>
 
   <div class="busca" id="busca-caixa">
@@ -109,6 +114,12 @@
     </div>
   </div>
 </section>
+
+<!-- ================================================================ código (o lado VS Code) -->
+<section class="vista oculta" id="codigo"></section>
+
+<!-- ================================================================ fluxos (estilo n8n) -->
+<section class="vista oculta" id="fluxos"></section>
 
 <!-- ================================================================ gaveta -->
 <aside class="gaveta" id="gaveta" aria-hidden="true">

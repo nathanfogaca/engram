@@ -1,7 +1,7 @@
 {
   "name": "engram",
   "productName": "Engram",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Palco de agentes de IA ligados por linhas, com cérebro de notas, arquivos por agente, skills e MCPs.",
   "main": "src/main/index.js",
   "private": true,
@@ -17,8 +17,12 @@
   },
   "dependencies": {
     "@lydell/node-pty": "1.1.0",
+    "@vscode/codicons": "0.0.45",
     "@xterm/headless": "5.5.0",
     "electron-updater": "6.8.11",
+    "monaco-editor": "0.57.0",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2",
     "yaml": "2.8.1"
   },
   "build": {
@@ -33,7 +37,10 @@
       "src/**/*",
       "!src/motor/**",
       "package.json",
-      "!node_modules/@lydell/**"
+      "!node_modules/@lydell/**",
+      "!node_modules/monaco-editor/{esm,dev}/**",
+      "!node_modules/monaco-editor/*.{md,txt,ts}",
+      "!node_modules/@vscode/codicons/src/**"
     ],
     "extraResources": [
       {

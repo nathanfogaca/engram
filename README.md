@@ -22,6 +22,10 @@ Um maestro divide o trabalho, cada um usa o modelo certo, e o que eles aprendem 
 | **Palco de agentes** | Cada agente é um cartão. Arraste uma linha entre dois e eles conversam; as mensagens correm pela linha. Um **maestro** recebe o pedido, delega e junta os resultados. |
 | **Vários agentes** | Claude Code e Codex completos, no mesmo time. Gemini CLI e OpenCode como experimentais. Cada janela com o seu modelo. |
 | **O time não cai** | Os agentes rodam num motor separado: fechar, reiniciar ou atualizar o app não derruba ninguém, e a conversa continua de onde parou. |
+| **Revisão no caminho** | Clique na linha entre dois agentes e escolha quem revisa: tudo o que um entrega passa pelo outro, junto com a tarefa original, antes de chegar a quem pediu. |
+| **Código** | O lado "VS Code" do Engram: explorador de arquivos, editor Monaco com abas e comparação de mudanças, git (commit, push, branches, mensagem escrita pela IA), terminais e busca rápida (Ctrl+P). Quando um agente mexe num arquivo aberto, o editor recarrega sozinho. |
+| **Extensões** | Temas de cores e de ícones, realce de sintaxe e snippets das extensões do VS Code: pela loja Open VSX, das que você já tem no VS Code ou no Cursor e das que vêm com o VS Code instalado. |
+| **Fluxos** | O projeto em blocos ligados, no estilo do n8n (tela → rota → tratamento → banco). Uma IA monta o mapa lendo a pasta; os agentes marcam o bloco em que estão mexendo e ele acende na cor de cada um. |
 | **Cérebro de notas** | Notas em Markdown ligadas por `[[id]]`, vistas como uma rede de neurônios viva. Os agentes leem antes de investigar e gravam o que aprendem. Fica numa pasta sua. |
 | **Conversa legível** | O cartão mostra a conversa em texto, sem gastar token. Leitor grande, arquivos por agente (mande logs e prints; ele devolve o que fez). |
 | **MCPs fáceis** | Cadastre, teste, ligue e desligue servidores MCP (HTTP ou programa local), por agente. Traga os que já estão no Claude Code e no Codex. |

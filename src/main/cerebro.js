@@ -198,9 +198,33 @@ class Cerebro {
 
   // ---------------------------------------------------------------- palco
 
-  conectar(a, b) { [a, b] = [a, b].sort(); return this.q('INSERT OR IGNORE INTO conexoes VALUES (?,?,?)').run(a, b, agora()).changes > 0; }
+  conectar(a, b) { [a, b] = [a, b].sort(); return this.q('INSERT OR IGNORE INTO conexoes (a, b, criada) VALUES (?,?,?)').run(a, b, agora()).changes > 0; }
   desconectar(a, b) { [a, b] = [a, b].sort(); return this.q('DELETE FROM conexoes WHERE a = ? AND b = ?').run(a, b).changes > 0; }
-  conexoes() { return this.q('SELECT a, b FROM conexoes').all().map(r => ({ ...r })); }
+  conexoes() { return this.q('SELECT a, b, revisa FROM conexoes').all().map(r => ({ ...r })); }
+  /** Revisão na ligação a-b: "revisor" (uma das pontas) revisa as entregas da outra; null tira. Cada agente tem um revisor só. */
+  revisao(a, b, revisor) {
+    [a, b] = [a, b].sort();
+    if (!this.q('SELECT 1 FROM conexoes WHERE a = ? AND b = ?').get(a, b)) return false;
+    if (revisor) {
+      const revisado = revisor === a ? b : a;
+      this.q('UPDATE conexoes SET revisa = NULL WHERE (a = ? OR b = ?) AND revisa IS NOT NULL AND revisa != ?').run(revisado, revisado, revisado);
+    }
+    this.q('UPDATE conexoes SET revisa = ? WHERE a = ? AND b = ?').run(revisor || null, a, b);
+    return true;
+  }
+  /** Quem revisa as entregas deste agente (ou null). */
+  revisorDe(id) {
+    return this.q('SELECT revisa FROM conexoes WHERE (a = ? OR b = ?) AND revisa IS NOT NULL AND revisa != ?').get(id, id, id)?.revisa || null;
+  }
+  /** Os agentes cujas entregas este revisa. */
+  revisados(id) {
+    return this.q('SELECT a, b FROM conexoes WHERE revisa = ?').all(id).map(r => (r.a === id ? r.b : r.a));
+  }
+  /** A última tarefa que um colega (fora os excluídos) mandou para este agente. */
+  ultimaTarefa(para, excluir = []) {
+    const r = this.q(`SELECT de, texto FROM mensagens WHERE para = ? AND de NOT IN (${excluir.map(() => '?').join(',') || "''"}) ORDER BY n DESC LIMIT 1`).get(para, ...excluir);
+    return r ? { ...r } : null;
+  }
   conectados(id) {
     return new Set(this.q('SELECT a, b FROM conexoes WHERE a = ? OR b = ?').all(id, id).map(r => (r.a === id ? r.b : r.a)));
   }

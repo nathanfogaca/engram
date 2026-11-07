@@ -1,4 +1,4 @@
-// As ferramentas do time (MCP): equipe, enviar, ver_tela, entregar_arquivo, criar_agente.
+// As ferramentas do time (MCP): equipe, enviar, ver_tela, entregar_arquivo, criar_agente e as dos fluxos.
 // Cada janela manda o próprio id no cabeçalho X-Engram-Sessao.
 
 const VERSAO_MAXIMA = '2025-06-18';
@@ -11,12 +11,21 @@ function ferramentas(janelas) {
   const objeto = (props, obrig = []) => ({ type: 'object', properties: props, required: obrig, additionalProperties: false });
   return [
     { name: 'equipe', description: 'Mostra quem você é no Engram e os colegas ligados a você por uma linha no palco (nome, papel, modelo, estado). Só com esses colegas dá para falar.', inputSchema: objeto({}), annotations: { readOnlyHint: true } },
-    { name: 'enviar', description: 'Manda uma mensagem para um colega ligado a você. Ela entra na conversa dele como um pedido; se ele estiver ocupado, entra quando terminar o turno. Ele não vê a sua conversa: mande tudo o que ele precisa. A resposta chega na sua conversa marcada com [Engram · mensagem de ...].',
+    { name: 'enviar', description: 'Manda uma mensagem para um colega ligado a você. Ela entra na conversa dele como um pedido; se ele estiver ocupado, entra quando terminar o turno. Ele não vê a sua conversa: mande tudo o que ele precisa. A resposta chega na sua conversa marcada com [Engram · mensagem de ...]. Se as suas entregas passam por um revisor (veja em equipe), o Engram leva tudo o que você mandar a ele.',
       inputSchema: objeto({ para: { type: 'string', description: 'nome do colega, como aparece em equipe' }, mensagem: { type: 'string', description: 'a tarefa ou o resultado, completo' } }, ['para', 'mensagem']) },
     { name: 'ver_tela', description: 'Mostra as últimas linhas do terminal de um colega ligado a você, para acompanhar sem interromper.',
       inputSchema: objeto({ quem: { type: 'string' }, linhas: { type: 'integer', minimum: 10, maximum: 200, default: 60 } }, ['quem']), annotations: { readOnlyHint: true } },
     { name: 'entregar_arquivo', description: 'Devolve um arquivo à pessoa: copia para a pasta entregues/ da sua janela, e ela vê na área de arquivos da sua conversa. Se você já gravou direto em entregues/, não precisa chamar.',
       inputSchema: objeto({ caminho: { type: 'string', description: 'caminho completo do arquivo' }, nome: { type: 'string', description: 'nome com que ele aparece (opcional)' } }, ['caminho']) },
+    { name: 'fluxos', description: 'Mostra os fluxos do projeto (a vista Fluxos do Engram, no estilo do n8n): cada funcionalidade em blocos (tela, rota, tratamento, banco...) com ids e arquivos. Veja antes de marcar ou desenhar.', inputSchema: objeto({}), annotations: { readOnlyHint: true } },
+    { name: 'fluxo_desenhar', description: 'Desenha (ou completa) um fluxo do projeto na vista Fluxos do Engram, em blocos ligados no estilo do n8n. Use para mostrar à pessoa o plano de uma funcionalidade antes de construir, ou para registrar uma que você mapeou. Bloco sem arquivos aparece como previsto (tracejado). Mesmo id = mesmo bloco: dá para completar depois.',
+      inputSchema: objeto({ fluxo: { type: 'object', description: '{ id (opcional), nome, blocos, ligacoes }', properties: {
+        id: { type: 'string' }, nome: { type: 'string' },
+        blocos: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, tipo: { type: 'string', enum: ['tela', 'componente', 'rota', 'servico', 'banco', 'fila', 'ia', 'externo', 'evento', 'arquivo'] }, titulo: { type: 'string' }, detalhe: { type: 'string' }, arquivos: { type: 'array', items: { type: 'string' } } }, required: ['id', 'tipo', 'titulo'] } },
+        ligacoes: { type: 'array', items: { type: 'object', properties: { de: { type: 'string' }, para: { type: 'string' }, rotulo: { type: 'string' } }, required: ['de', 'para'] } },
+      }, required: ['nome', 'blocos'] } }, ['fluxo']) },
+    { name: 'fluxo_marcar', description: 'Marca na vista Fluxos do Engram o bloco em que você está mexendo (trabalhando), que terminou (feito) ou que deu problema (falhou): a pessoa vê o bloco acender com o seu nome. Mande também os arquivos que você criou ou mudou nele (caminhos relativos à pasta do projeto).',
+      inputSchema: objeto({ fluxo: { type: 'string', description: 'id do fluxo (veja em fluxos)' }, bloco: { type: 'string', description: 'id do bloco' }, estado: { type: 'string', enum: ['trabalhando', 'feito', 'falhou'] }, arquivos: { type: 'array', items: { type: 'string' } } }, ['fluxo', 'bloco', 'estado']) },
     { name: 'criar_agente', description: `Só para o maestro. Abre uma janela nova no palco, já ligada a você, e opcionalmente já manda a primeira tarefa. Modelo leve para tarefa simples, forte para análise difícil. Sem "agente", usa o mesmo agente (CLI) que você. Máximo de ${janelas.cfg.max_janelas} janelas abertas. Agentes e modelos disponíveis: ${opcoes}.`,
       inputSchema: objeto({
         nome: { type: 'string' }, papel: { type: 'string', enum: papeis },
@@ -48,6 +57,9 @@ async function tratar(janelas, sessao, m) {
         case 'equipe': return ok(texto(JSON.stringify(janelas.equipe(sessao), null, 2)));
         case 'enviar': return ok(texto(janelas.enviar(sessao, String(a.para || ''), String(a.mensagem || ''))));
         case 'ver_tela': return ok(texto(janelas.verTela(sessao, String(a.quem || ''), a.linhas ?? 60)));
+        case 'fluxos': return ok(texto(janelas.fluxos ? janelas.fluxos.paraAgente() : 'Os fluxos não estão disponíveis.'));
+        case 'fluxo_desenhar': return ok(texto(janelas.fluxos.desenhar(sessao, a.fluxo)));
+        case 'fluxo_marcar': return ok(texto(janelas.fluxos.marcar(sessao, a)));
         case 'entregar_arquivo': return ok(texto(janelas.entregarArquivo(sessao, String(a.caminho || ''), a.nome)));
         case 'criar_agente': return ok(texto(await janelas.criarAgente(sessao, String(a.nome || ''), String(a.papel || 'livre'), String(a.modelo || ''), a.tarefa, a.agente ? String(a.agente) : null)));
         default: return { jsonrpc: '2.0', id: m.id, error: { code: -32602, message: `ferramenta desconhecida: ${p.name}` } };

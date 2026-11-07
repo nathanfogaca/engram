@@ -6,7 +6,7 @@ class ErroRota extends Error {
   constructor(status, mensagem) { super(mensagem); this.status = status; }
 }
 
-function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador }) {
+function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes }) {
   const importador = require('./importar');
   const rotas = [];
   const rota = (metodo, padrao, fn) => {
@@ -42,6 +42,12 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
   rota('POST', '/api/conexoes', (_, b) => {
     exigir(b.a && b.b && b.a !== b.b && janelas.ativas.has(b.a) && janelas.ativas.has(b.b), 400, 'as duas pontas têm de ser janelas abertas e diferentes');
     if (cerebro.conectar(b.a, b.b)) janelas.avisar({ tipo: 'conexao', acao: 'criada', a: b.a, b: b.b });
+    return { ok: true };
+  });
+  rota('POST', '/api/conexoes/revisao', (_, b) => {
+    exigir(!b.revisor || b.revisor === b.a || b.revisor === b.b, 400, 'o revisor tem de ser uma das pontas da ligação');
+    exigir(cerebro.revisao(b.a, b.b, b.revisor || null), 404, 'essas duas janelas não estão ligadas');
+    for (const c of cerebro.conexoes()) janelas.avisar({ tipo: 'conexao', acao: 'revisao', a: c.a, b: c.b, revisa: c.revisa || null });
     return { ok: true };
   });
   rota('POST', '/api/conexoes/remover', (_, b) => {
@@ -254,6 +260,10 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
       return r;
     } catch (e) { throw new ErroRota(400, e.message); }
   });
+
+  codigo?.registrarRotas(rota); // vista Código: arquivos, git e terminais da pasta aberta
+  fluxos?.registrarRotas(rota); // vista Fluxos: o mapa do projeto em blocos, estilo n8n
+  extensoes?.registrarRotas(rota); // extensões do VS Code (Open VSX): temas, ícones, realce e snippets
 
   return async function tratar(metodo, caminho, corpo) {
     const url = new URL(caminho, 'engram://app');

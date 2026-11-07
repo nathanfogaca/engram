@@ -22,10 +22,20 @@ const { Cofre } = require('./cofre');
 const { Provedores } = require('./provedores');
 const { Mcps } = require('./mcps');
 const { Skills } = require('./skills');
+const { Codigo } = require('./codigo');
+const { Fluxos } = require('./fluxos');
+const { Extensoes } = require('./extensoes');
 
 const TELA = path.resolve(__dirname, '..', 'tela');
-const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' engram: data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'";
+const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json', '.wasm': 'application/wasm', '.woff': 'font/woff', '.otf': 'font/otf' };
+// pacotes que a tela usa direto da pasta node_modules (o editor da vista Código e os ícones dele)
+const MODULOS = path.resolve(__dirname, '..', '..', 'node_modules');
+const PACOTES = {
+  'monaco/': path.join(MODULOS, 'monaco-editor', 'min'), 'codicons/': path.join(MODULOS, '@vscode', 'codicons', 'dist'),
+  // o realce de sintaxe das extensões (gramáticas TextMate), o mesmo motor do VS Code
+  'modulos/vscode-textmate/': path.join(MODULOS, 'vscode-textmate', 'release'), 'modulos/vscode-oniguruma/': path.join(MODULOS, 'vscode-oniguruma', 'release'),
+};
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' engram: data: blob: https://open-vsx.org https://openvsx.eclipsecontent.org; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'";
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'engram', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
@@ -59,6 +69,10 @@ async function iniciarNucleo() {
   const skills = new Skills({ dados: c.dados, registrar: config.registrar });
   skills.sincronizar(); // plugin do Claude e pastas do Engram no Codex, conforme a biblioteca
   const janelas = new Janelas({ cfg, cerebro, fonte, token, caminhos: c, avisar, provedores, mcps, skills });
+  const codigo = new Codigo({ cfg, salvarConfig: config.salvar, avisar, janelas, provedores, registrar: config.registrar });
+  const fluxos = new Fluxos({ codigo, janelas, provedores, avisar, cfg, registrar: config.registrar });
+  janelas.fluxos = fluxos; // as ferramentas fluxo_* do time (MCP) falam com ele
+  const extensoes = new Extensoes({ dados: c.dados, cfg, salvarConfig: config.salvar, avisar, registrar: config.registrar });
   const estadoSinc = { rodando: false, ultimo: null, erro: null };
 
   async function sincronizar(forcar = false) {
@@ -105,8 +119,8 @@ async function iniciarNucleo() {
     try { janela.setTitleBarOverlay({ color: t.fundo, symbolColor: t.simbolos, height: 40 }); } catch { /* sem barra */ }
   };
   definirTema(cfg.tema);
-  const rotas = criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador });
-  return { cfg, janelas, rotas, arquivos: new Arquivos(c.arquivos) };
+  const rotas = criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes });
+  return { cfg, janelas, rotas, extensoes, arquivos: new Arquivos(c.arquivos) };
 }
 
 function registrarProtocolo() {
@@ -114,8 +128,18 @@ function registrarProtocolo() {
     const url = new URL(req.url);
     if (url.host === 'app') {
       const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
-      const alvo = path.resolve(TELA, rel);
-      if (!alvo.startsWith(TELA + path.sep) || !fs.existsSync(alvo)) return new Response('não existe', { status: 404 });
+      if (rel.startsWith('ext/')) {
+        // arquivos de extensões (temas, ícones, gramáticas, snippets): só dentro da pasta de cada uma
+        const [, id, ...resto] = url.pathname.replace(/^\/+/, '').split('/');
+        const alvo = nucleo?.extensoes?.arquivo(decodeURIComponent(id || ''), resto.join('/'));
+        if (!alvo) return new Response('não existe', { status: 404 });
+        const r = await net.fetch(pathToFileURL(alvo).toString());
+        return new Response(r.body, { status: 200, headers: { 'Content-Type': TIPOS[path.extname(alvo).toLowerCase()] || 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff' } });
+      }
+      const pacote = Object.keys(PACOTES).find(p => rel.startsWith(p));
+      const base = pacote ? PACOTES[pacote] : TELA;
+      const alvo = path.resolve(base, pacote ? rel.slice(pacote.length) : rel);
+      if (!alvo.startsWith(base + path.sep) || !fs.existsSync(alvo)) return new Response('não existe', { status: 404 });
       const r = await net.fetch(pathToFileURL(alvo).toString());
       const cab = { 'Content-Type': TIPOS[path.extname(alvo).toLowerCase()] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff' };
       if (alvo.endsWith('.html')) cab['Content-Security-Policy'] = CSP;

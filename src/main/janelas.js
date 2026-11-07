@@ -17,7 +17,7 @@ const EVENTOS_GANCHO = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostT
 const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando', PreToolUse: 'trabalhando', PostToolUse: 'pensando', Stop: 'esperando você', Notification: 'precisa de você' };
 const LIVRE = new Set(['pronta', 'esperando você']);
 const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
-const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'entregar_arquivo'];
+const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
 const PESSOA = 'pessoa'; // remetente das mensagens que a pessoa digita na vista Conversa
 const MAX_BUFFER = 400_000;
 const TAMANHO_PADRAO = [700, 470];
@@ -71,6 +71,7 @@ class Janelas {
     this.avisar = avisar;
     this.ativas = new Map();
     this.auxiliares = new Map(); // terminais de apoio (login, instalação): fora do palco e do time
+    this.terminais = new Map(); // terminais da vista Código (shell na pasta do projeto)
     this.arquivos = new Arquivos(caminhos.arquivos);
     fs.mkdirSync(caminhos.janelas, { recursive: true });
     this.arquivoGanchos = path.join(caminhos.dados, 'ganchos.json');
@@ -109,7 +110,7 @@ class Janelas {
     const lista = await this.motor.pedir('listar');
     const vivos = new Set(lista.terminais.filter(t => t.viva).map(t => t.id));
     // login ou instalação que ficou aberto quando o app fechou: ninguém mais olha para ele
-    for (const t of lista.terminais) if (t.id.startsWith('aux-')) { this.motor.mandar('fechar', { id: t.id }); this.motor.mandar('esquecer', { id: t.id }); }
+    for (const t of lista.terminais) if (/^(aux|cod)-/.test(t.id)) { this.motor.mandar('fechar', { id: t.id }); this.motor.mandar('esquecer', { id: t.id }); }
     const retomar = [];
     for (const s of this.cerebro.sessoes(500)) {
       if (vivos.has(s.id)) { if (!this.ativas.has(s.id)) await this.reanexar(s); }
@@ -144,7 +145,7 @@ class Janelas {
   recolocarMensagens() {
     for (const m of this.cerebro.mensagensPendentes()) {
       const j = this.ativas.get(m.para);
-      if (j && !j.caixa.some(([n]) => n === m.n)) j.caixa.push([m.n, m.de, this.formatar(m.de, m.texto)]);
+      if (j && !j.caixa.some(([n]) => n === m.n)) j.caixa.push([m.n, m.de, this.revisorAtivo(m.de) === m.para ? this.paraRevisao(m.de, m.para, m.texto) : this.formatar(m.de, m.texto, m.para)]);
     }
     for (const j of this.ativas.values()) this.tentarEntregar(j, 1000);
   }
@@ -288,7 +289,20 @@ class Janelas {
     if (this.auxiliares.has(id)) this.motor.mandar('fechar', { id });
   }
 
-  janela(id) { return this.ativas.get(id) || this.auxiliares.get(id); }
+  janela(id) { return this.ativas.get(id) || this.auxiliares.get(id) || this.terminais.get(id); }
+
+  /** Terminal da vista Código: um shell de verdade no motor, na pasta do projeto. */
+  async abrirTerminal(argv, cwd) {
+    if (this.terminais.size >= 8) throw new Error('já há 8 terminais abertos: feche um antes');
+    const id = `cod-${crypto.randomUUID()}`;
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !VARIAVEIS_FORA.has(k.toUpperCase())));
+    Object.assign(env, { TERM_PROGRAM: 'Engram', COLORTERM: 'truecolor' });
+    await this.motor.pedir('abrir', { id, argv, cwd, env, linhas: 24, colunas: 100 });
+    this.terminais.set(id, new Janela(id, this.motor, 'terminal'));
+    return id;
+  }
+
+  fecharTerminal(id) { if (this.terminais.has(id)) this.motor.mandar('fechar', { id }); }
 
   // ---------------------------------------------------------------- terminal
 
@@ -300,6 +314,17 @@ class Janelas {
   }
 
   motorFim(id) {
+    const term = this.terminais.get(id);
+    if (term) {
+      this.terminais.delete(id);
+      this.motor.mandar('esquecer', { id });
+      term.viva = false;
+      const texto = '\r\n\x1b[2m[terminal encerrado]\x1b[0m\r\n';
+      term.guardar(texto);
+      for (const cb of term.ouvintes) { cb(texto); cb(null); }
+      this.avisar({ tipo: 'codigo', evento: 'terminal-fim', id });
+      return;
+    }
     const aux = this.auxiliares.get(id);
     if (aux) {
       this.auxiliares.delete(id);
@@ -485,13 +510,57 @@ class Janelas {
 
   equipe(id) {
     const colegas = [...this.cerebro.conectados(id)].sort().filter(c => this.ativas.has(c)).map(c => this.descricao(c));
-    return { voce: this.descricao(id), colegas, sua_pasta_de_arquivos: this.arquivos.pasta(id) };
+    const r = { voce: this.descricao(id), colegas, sua_pasta_de_arquivos: this.arquivos.pasta(id) };
+    const revisor = this.revisorAtivo(id);
+    if (revisor) r.suas_entregas_passam_por = `${this.cerebro.sessao(revisor).nome} (tudo o que você mandar vai para ele revisar antes de seguir)`;
+    const revisados = this.cerebro.revisados(id).filter(x => this.ativas.has(x)).map(x => this.cerebro.sessao(x).nome);
+    if (revisados.length) r.voce_revisa_as_entregas_de = revisados;
+    return r;
+  }
+
+  /** O revisor deste agente, se a ligação de revisão existe e ele está aberto. */
+  revisorAtivo(id) {
+    const r = this.cerebro.revisorDe(id);
+    return r && this.ativas.has(r) && this.cerebro.conectados(id).has(r) ? r : null;
+  }
+
+  /** Mensagem que leva ao revisor o que o agente entregou, junto com a tarefa que ele recebeu. */
+  paraRevisao(de, revisor, texto, queria = null) {
+    const r = this.descricao(de);
+    const t = this.cerebro.ultimaTarefa(de, [revisor, de, PESSOA]);
+    const dono = t && this.ativas.has(t.de) ? t.de : queria;
+    const nomeDono = dono ? this.cerebro.sessao(dono)?.nome : null;
+    const partes = [`[Engram · revisão · entrega de ${r.nome} (${r.papel}, ${r.modelo})]`];
+    if (t) partes.push(`Tarefa que ${this.cerebro.sessao(t.de)?.nome || 'um colega'} passou a ${r.nome}:\n«${t.texto.length > 6000 ? `${t.texto.slice(0, 6000)}…` : t.texto}»`);
+    if (queria && queria !== dono) partes.push(`(${r.nome} quis mandar isto a ${this.cerebro.sessao(queria)?.nome}.)`);
+    partes.push(`O que ${r.nome} entregou:\n${texto}`);
+    let dica = `Você revisa as entregas de ${r.nome}. Confira antes de passar adiante.`;
+    if (nomeDono) {
+      dica += ` Se estiver certo, entregue a ${nomeDono} com mcp__engram__enviar para="${nomeDono}", com o resultado e o que você conferiu.`;
+      if (!this.cerebro.conectados(revisor).has(dono)) dica += ` (Você não está ligado a ${nomeDono} no palco: peça à pessoa para ligar vocês dois.)`;
+    } else dica += ' Não achei de quem veio a tarefa: entregue a quem pediu.';
+    dica += ` Se precisar corrigir, devolva a ${r.nome} com para="${r.nome}" dizendo o quê, uma vez só; na segunda, entregue com as ressalvas. Se for uma dúvida e não uma entrega, responda você ou leve a quem pediu.`;
+    partes.push(`(${dica})`);
+    return partes.join('\n\n');
   }
 
   enviar(de, para, texto) {
     const alvo = this.achar(para);
     if (!alvo) return `Não há janela aberta chamada "${para}". Veja os nomes com equipe.`;
     if (alvo === de) return 'Você não pode mandar mensagem para você mesmo.';
+    // revisão no caminho: tudo o que um agente revisado manda vai para o revisor dele, com a tarefa junto
+    const revisor = this.revisorAtivo(de);
+    if (revisor) {
+      texto = String(texto || '').trim();
+      if (!texto) return 'A mensagem está vazia.';
+      if (this.cerebro.mensagensNoPar(de, revisor) >= this.cfg.max_mensagens_par_10min) return 'Limite de mensagens entre você e o seu revisor nos últimos 10 minutos. Pare e espere.';
+      const j = this.ativas.get(revisor);
+      const formatado = this.paraRevisao(de, revisor, texto.slice(0, 20_000), alvo === revisor ? null : alvo);
+      const posicao = this.enfileirar(j, de, texto.slice(0, 20_000), formatado);
+      const nomeR = this.cerebro.sessao(revisor).nome;
+      const desvio = alvo === revisor ? '' : ` Suas entregas passam por ${nomeR}: ele revisa antes de chegar a ${this.cerebro.sessao(alvo).nome}.`;
+      return `Mensagem entregue a ${nomeR}${posicao ? ` (entra quando ele terminar o turno, ${posicao} na frente)` : ''}.${desvio}`;
+    }
     if (!this.cerebro.conectados(de).has(alvo)) return `Você não está ligado a "${para}" no palco. Só dá para falar com quem está ligado a você (a pessoa liga arrastando uma linha entre os cartões).`;
     if (this.cerebro.mensagensNoPar(de, alvo) >= this.cfg.max_mensagens_par_10min) return 'Limite de mensagens entre vocês dois nos últimos 10 minutos. Pare e espere: isso costuma ser dois agentes respondendo um ao outro em loop.';
     texto = String(texto || '').trim();
@@ -535,16 +604,21 @@ class Janelas {
 
   // ---------------------------------------------------------------- caixa de mensagens
 
-  formatar(de, texto) {
+  formatar(de, texto, para = null) {
     if (de === PESSOA) return texto;
     const r = this.descricao(de);
-    return `[Engram · mensagem de ${r.nome} (${r.papel}, ${r.modelo})]\n${texto}\n\n(Para responder, use mcp__engram__enviar com para="${r.nome}".)`;
+    // quem tem revisor entrega a ele, não a quem pediu
+    const revisor = para ? this.revisorAtivo(para) : null;
+    const dica = revisor && revisor !== de
+      ? `Quando terminar, entregue o resultado com mcp__engram__enviar para="${this.cerebro.sessao(revisor).nome}": suas entregas passam por ele, que revisa antes de levar a ${r.nome}. Dúvidas sobre a tarefa também vão para ele.`
+      : `Para responder, use mcp__engram__enviar com para="${r.nome}".`;
+    return `[Engram · mensagem de ${r.nome} (${r.papel}, ${r.modelo})]\n${texto}\n\n(${dica})`;
   }
 
-  enfileirar(j, de, texto) {
+  enfileirar(j, de, texto, formatado = null) {
     const n = this.cerebro.mensagemRegistrar(de, j.id, texto);
     const naFrente = j.caixa.length + (j.entregando || !LIVRE.has(j.estado) ? 1 : 0);
-    j.caixa.push([n, de, this.formatar(de, texto)]);
+    j.caixa.push([n, de, formatado || this.formatar(de, texto, j.id)]);
     this.avisar({ tipo: 'mensagem', fase: 'enviada', de, para: j.id, texto: texto.slice(0, 240), n });
     this.tentarEntregar(j);
     return naFrente;
@@ -657,4 +731,4 @@ function resumoEvento(evento, ferramenta, e, mensagem) {
   return `${nome} ${alvo}`.trim().slice(0, 200);
 }
 
-module.exports = { Janelas, posicaoValida, MotorErro };
+module.exports = { Janelas, posicaoValida, MotorErro, VARIAVEIS_FORA };

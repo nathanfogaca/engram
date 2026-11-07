@@ -1,0 +1,149 @@
+/* Vista Fluxos: o projeto em blocos ligados (estilo n8n), no vidro e nas cores do tema do Engram. */
+
+#fluxos { overflow: hidden; }
+.flx {
+  position: absolute; top: 84px; left: 14px; right: 14px; bottom: 14px;
+  display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 12px; transition: grid-template-columns .25s var(--suave);
+}
+.flx.com-gaveta { grid-template-columns: 290px minmax(0, 1fr) 340px; }
+.flx-lado, .flx-palco, .flx-gaveta {
+  background: var(--vidro); border: 1px solid var(--borda); border-radius: var(--raio); backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow: 0 18px 50px rgb(0 0 0 / .28); overflow: hidden; min-width: 0;
+}
+.flx .codicon { font-size: 15px; line-height: 1; }
+.flx-dica { color: var(--discreto); font-size: 12px; line-height: 1.45; margin: 0; }
+
+/* ------------------------------------------------ lateral */
+.flx-lado { display: flex; flex-direction: column; gap: 10px; padding: 14px 12px; overflow: auto; }
+.flx-projeto { display: flex; align-items: center; gap: 8px; }
+.flx-projeto .codicon { color: #e8b75a; }
+.flx-projeto b { font: 700 12px var(--sans); letter-spacing: .04em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flx-mapear { display: grid; gap: 8px; }
+.flx-mapear .btn-brilho > span { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
+.flx-modelo-rotulo { display: flex; align-items: center; gap: 8px; color: var(--discreto); font-size: 12px; }
+.flx-modelo { flex: 1; height: 28px; border-radius: 8px; border: 1px solid var(--borda-forte); background: rgb(var(--poco) / .35); color: var(--texto); font: 12.5px var(--sans); padding: 0 6px; }
+.flx-mapeando { display: grid; gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid rgb(var(--acento1) / .4); background: rgb(var(--acento1) / .1); box-shadow: 0 0 24px rgb(var(--acento1) / .18) inset; }
+.flx-mapeando-topo { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.flx-mapeando small { color: var(--discreto); font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flx-mapeando .btn { display: inline-flex; align-items: center; gap: 6px; justify-self: start; }
+.flx-resumo { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgb(var(--poco) / .22); color: var(--texto); font-size: 12.5px; line-height: 1.5; }
+.flx-titulo-lista { display: flex; align-items: center; gap: 8px; margin-top: 4px; font: 700 10.5px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--discreto); }
+.flx-lista { display: grid; gap: 4px; }
+.flx-item {
+  display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: auto auto; column-gap: 9px; align-items: center; padding: 8px 10px;
+  border: 1px solid transparent; border-radius: 10px; background: none; color: var(--texto); text-align: left; cursor: pointer; transition: background .15s, border-color .15s;
+}
+.flx-item:hover { background: rgb(var(--tinta) / .05); }
+.flx-item.ativo { background: rgb(var(--acento1) / .14); border-color: rgb(var(--acento1) / .35); }
+.flx-item-cores { grid-row: 1 / 3; display: grid; grid-template-columns: repeat(2, 7px); gap: 2px; }
+.flx-item-cores i { width: 7px; height: 7px; border-radius: 2px; }
+.flx-item-nome { font: 600 13px var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flx-item small { grid-column: 2; color: var(--apagado); font-size: 11.5px; }
+.flx-item-vivo { width: 8px; height: 8px; border-radius: 50%; background: var(--ambar); box-shadow: 0 0 10px var(--ambar); animation: flx-piscar 1.2s ease-in-out infinite; }
+@keyframes flx-piscar { 50% { opacity: .35; } }
+
+/* ------------------------------------------------ palco do fluxo */
+.flx-palco { display: flex; flex-direction: column; }
+.flx-barra { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--borda); flex: none; min-width: 0; }
+.flx-barra > .codicon { color: var(--ciano); }
+.flx-nome { font: 700 14px var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flx-status { display: inline-flex; align-items: center; gap: 6px; color: var(--discreto); font-size: 12px; white-space: nowrap; }
+.flx-status.vivo { color: var(--ambar); }
+.flx-zoom { width: 40px; text-align: center; font-size: 11px; color: var(--discreto); font-variant-numeric: tabular-nums; }
+.flx-tela {
+  position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: grab; background-color: rgb(var(--poco) / .18);
+  background-image: radial-gradient(circle, rgb(var(--tinta) / .13) 1px, transparent 1.4px); background-size: 24px 24px;
+}
+.flx-tela.arrastando { cursor: grabbing; }
+.flx-mundo { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.flx-linhas { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.flx-linha { fill: none; stroke: rgb(var(--tinta) / .28); stroke-width: 2; }
+.flx-linha.ativa { stroke: var(--ambar); stroke-dasharray: 8 6; animation: flx-corre .8s linear infinite; filter: drop-shadow(0 0 4px rgb(255 200 87 / .7)); }
+.flx-linha.destaque { stroke: var(--ciano); stroke-width: 2.6; filter: drop-shadow(0 0 5px rgb(var(--acento2) / .6)); }
+.flx-cometa { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 260; animation: flx-cometa 1.6s linear infinite; filter: drop-shadow(0 0 6px var(--ambar)); }
+.flx-seta { fill: rgb(var(--tinta) / .42); }
+.flx-seta.ativa { fill: var(--ambar); }
+.flx-seta.destaque { fill: var(--ciano); }
+@keyframes flx-corre { to { stroke-dashoffset: -14; } }
+@keyframes flx-cometa { from { stroke-dashoffset: 262; } to { stroke-dashoffset: 0; } }
+.flx-rotulo {
+  position: absolute; transform: translate(-50%, -50%); max-width: 170px; padding: 1px 9px; border-radius: 10px; border: 1px solid var(--borda-forte);
+  background: rgb(var(--superficie-alta) / .95); color: var(--discreto); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.flx-rotulo.destaque { border-color: var(--ciano); color: var(--texto); }
+
+.flx-bloco {
+  position: absolute; width: 232px; height: 72px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 13px;
+  border-radius: 14px; border: 1.5px solid rgb(var(--tinta) / .14); background: rgb(var(--superficie-alta) / .96);
+  box-shadow: 0 6px 20px rgb(0 0 0 / .28); cursor: pointer; user-select: none; transition: border-color .2s, box-shadow .2s, transform .15s;
+}
+.flx-bloco::before { content: ""; position: absolute; left: -1.5px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--cor); box-shadow: 0 0 10px var(--cor); }
+.flx-bloco:hover { border-color: color-mix(in srgb, var(--cor) 70%, transparent); transform: translateY(-1px); }
+.flx-bloco.selecionado { border-color: var(--ciano); box-shadow: 0 0 0 3px rgb(var(--acento2) / .25), 0 8px 26px rgb(0 0 0 / .32); }
+.flx-bloco.arrastando { cursor: grabbing; z-index: 3; box-shadow: 0 16px 36px rgb(0 0 0 / .4); transition: none; transform: scale(1.02); }
+.flx-icone { flex: none; width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; background: color-mix(in srgb, var(--cor) 18%, transparent); color: var(--cor); }
+.flx-icone .codicon { font-size: 21px !important; }
+.flx-textos { flex: 1; min-width: 0; }
+.flx-titulo { font: 600 13px var(--sans); color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flx-sub { margin-top: 2px; font-size: 11.5px; color: var(--discreto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flx-porta { position: absolute; top: 50%; width: 10px; height: 10px; margin-top: -5px; box-sizing: border-box; border-radius: 50%; border: 2px solid rgb(var(--tinta) / .35); background: rgb(var(--superficie-alta)); }
+.flx-porta.entrada { left: -6px; } .flx-porta.saida { right: -6px; }
+.flx-selo { flex: none; display: grid; place-items: center; }
+.flx-bloco.st-feito .flx-selo { color: var(--verde); }
+.flx-bloco.st-falhou { border-color: rgb(255 107 125 / .7); }
+.flx-bloco.st-falhou .flx-selo { color: var(--perigo); }
+.flx-bloco.st-previsto { border-style: dashed; background: rgb(var(--superficie) / .7); }
+.flx-bloco.st-previsto .flx-icone { opacity: .7; filter: saturate(.6); }
+.flx-bloco.st-previsto .flx-selo { color: var(--apagado); }
+.flx-bloco.st-trabalhando { --brilho: var(--agente, var(--ambar)); border-color: var(--brilho); animation: flx-pulsa 1.6s ease-in-out infinite; }
+.flx-bloco.st-trabalhando .flx-selo, .flx-bloco.st-trabalhando .flx-sub { color: var(--brilho); }
+@keyframes flx-pulsa {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brilho) 55%, transparent), 0 6px 20px rgb(0 0 0 / .28); }
+  50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--brilho) 0%, transparent), 0 0 30px color-mix(in srgb, var(--brilho) 45%, transparent); }
+}
+.flx-quem { position: absolute; left: 12px; top: -11px; display: flex; gap: 4px; }
+.flx-quem span { padding: 0 8px; border-radius: 8px; background: var(--agente, var(--ambar)); color: #0b0f17; font: 700 10.5px/18px var(--sans); box-shadow: 0 0 12px var(--agente, var(--ambar)); }
+.flx-legenda {
+  position: absolute; left: 12px; bottom: 12px; max-width: 70%; display: flex; flex-wrap: wrap; gap: 3px 12px; padding: 6px 10px; border-radius: 10px;
+  border: 1px solid var(--borda); background: rgb(var(--superficie-alta) / .85); backdrop-filter: blur(10px); font-size: 11.5px; color: var(--discreto);
+}
+.flx-legenda:empty { display: none; }
+.flx-legenda span { display: flex; align-items: center; gap: 5px; }
+.flx-legenda i { width: 9px; height: 9px; border-radius: 3px; }
+.flx-vazio { position: absolute; inset: 0; display: grid; place-items: center; cursor: default; background: radial-gradient(600px 300px at 50% 45%, rgb(var(--acento2) / .1), transparent 70%); }
+.flx-vazio[hidden] { display: none; }
+.flx-vazio-miolo { display: grid; justify-items: center; gap: 10px; max-width: 520px; padding: 30px; text-align: center; }
+.flx-vazio-miolo h2 { margin: 4px 0 0; font: 700 22px var(--sans); color: var(--texto-forte); }
+.flx-vazio-miolo p { margin: 0; color: var(--discreto); line-height: 1.55; font-size: 13.5px; }
+.flx-vazio-miolo .btn-brilho > span { display: inline-flex; align-items: center; gap: 6px; }
+.flx-vazio-icone { width: 74px; height: 74px; display: grid; place-items: center; border-radius: 22px; background: linear-gradient(135deg, rgb(var(--acento2) / .35), rgb(var(--acento1) / .3)); box-shadow: 0 0 40px rgb(var(--acento2) / .35); }
+.flx-vazio-icone .codicon { font-size: 34px !important; color: #fff; }
+
+/* ------------------------------------------------ gaveta do bloco */
+.flx-gaveta { display: flex; flex-direction: column; gap: 8px; padding: 14px; overflow: auto; animation: cod-surgir .2s var(--suave); }
+.flx-gaveta[hidden] { display: none; }
+.flx-gaveta-topo { display: flex; align-items: center; gap: 10px; }
+.flx-gaveta-titulos { flex: 1; min-width: 0; display: grid; }
+.flx-gaveta-titulos b { font: 700 14.5px var(--sans); overflow-wrap: anywhere; }
+.flx-gaveta-titulos small { color: var(--discreto); font-size: 11.5px; }
+.flx-estado { display: inline-flex; align-items: center; gap: 7px; align-self: start; padding: 4px 10px; border-radius: 9px; background: rgb(var(--tinta) / .06); color: var(--discreto); font-size: 12px; }
+.flx-estado.st-trabalhando { color: var(--agente, var(--ambar)); background: color-mix(in srgb, var(--agente, var(--ambar)) 14%, transparent); }
+.flx-estado.st-feito { color: var(--verde); } .flx-estado.st-falhou { color: var(--perigo); }
+.flx-detalhe { margin: 2px 0; color: var(--texto); font-size: 13px; line-height: 1.55; }
+.flx-gaveta h4 { margin: 8px 0 0; font: 700 10.5px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--discreto); }
+.flx-arquivos { display: grid; gap: 3px; }
+.flx-arquivo, .flx-ligacao {
+  display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 9px; border: 1px solid var(--borda); border-radius: 9px; background: rgb(var(--poco) / .2);
+  color: var(--texto); font: 12.5px var(--sans); text-align: left; cursor: pointer;
+}
+.flx-arquivo span { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.flx-arquivo:hover, .flx-ligacao:hover { border-color: rgb(var(--acento2) / .5); background: rgb(var(--acento2) / .08); }
+.flx-ligacao small { margin-left: auto; color: var(--apagado); font-size: 11px; }
+.flx-pedido { display: grid; gap: 8px; }
+.flx-pedido select, .flx-pedido textarea {
+  width: 100%; box-sizing: border-box; border-radius: 10px; border: 1px solid var(--borda-forte); background: rgb(var(--poco) / .35); color: var(--texto); font: 13px/1.45 var(--sans); padding: 7px 10px; outline: none;
+}
+.flx-pedido select { height: 32px; padding: 0 8px; }
+.flx-pedido textarea { resize: vertical; min-height: 64px; }
+.flx-pedido textarea:focus { border-color: rgb(var(--acento1) / .6); box-shadow: 0 0 0 3px rgb(var(--acento1) / .15); }
+.flx-pedido .btn-brilho > span { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
