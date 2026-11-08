@@ -17,7 +17,9 @@ const EVENTOS_GANCHO = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostT
 const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando', PreToolUse: 'trabalhando', PostToolUse: 'pensando', Stop: 'esperando você', Notification: 'precisa de você' };
 const LIVRE = new Set(['pronta', 'esperando você']);
 const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
-const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
+const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
+// as cores dos setores, as mesmas da tela (src/tela/js/setores.js)
+const CORES_SETOR = { violeta: '#8b7bff', ciano: '#38d6f5', magenta: '#e879f9', ambar: '#ffc857', verde: '#4ade9f', coral: '#ff7a6b' };
 const PESSOA = 'pessoa'; // remetente das mensagens que a pessoa digita na vista Conversa
 const MAX_BUFFER = 400_000;
 const TAMANHO_PADRAO = [700, 470];
@@ -787,6 +789,109 @@ class Janelas {
     const movidos = novas.filter(n => n.id !== de).length;
     const emSetor = [...this.ativas.keys()].filter(id => id !== de && this.cerebro.setorDe(id)).length;
     return `Organizei o palco: ${movidos === 1 ? '1 colega' : `${movidos} colegas`} em volta de você, agrupados por papel.${emSetor ? ` ${emSetor === 1 ? 'O colega que está num setor ficou' : `Os ${emSetor} que estão em setores ficaram`} onde a pessoa deixou.` : ''}`;
+  }
+
+  // ---------------------------------------------------------------- setores pelo maestro
+
+  /** Os nomes viram ids de janelas abertas; devolve { ids } ou { erro }. */
+  agentesPorNome(nomes) {
+    const lista = (Array.isArray(nomes) ? nomes : []).map(n => String(n ?? '').trim()).filter(Boolean);
+    if (!lista.length) return { erro: 'Diga quais agentes ficam no setor, em agentes: ["nome", ...] (os nomes como aparecem em equipe).' };
+    const ids = [], faltam = [];
+    for (const n of lista) { const id = this.achar(n); if (id) { if (!ids.includes(id)) ids.push(id); } else faltam.push(`"${n}"`); }
+    if (faltam.length) return { erro: `Não há janela aberta chamada ${faltam.join(', ')}. Veja os nomes com equipe.` };
+    return { ids };
+  }
+
+  /**
+   * A área de um setor em volta destes agentes. Se o retângulo pegaria alguém de fora ou encostaria
+   * noutro setor, junta os cartões numa grade num lugar livre e envolve a grade.
+   */
+  areaEmVolta(ids, ignorar = null) {
+    const FOLGA = 60, VAO = 60, ETIQUETA = 70;
+    const [pw, ph] = TAMANHO_PADRAO;
+    const pos = id => this.cerebro.posicao(id) || { x: 0, y: 0, w: pw, h: ph };
+    const caixa = ps => {
+      const x = Math.min(...ps.map(p => p.x)) - FOLGA, y = Math.min(...ps.map(p => p.y)) - FOLGA;
+      return { x, y, w: Math.max(...ps.map(p => p.x + p.w)) + FOLGA - x, h: Math.max(...ps.map(p => p.y + p.h)) + FOLGA - y };
+    };
+    const encosta = (a, b, m = 0) => a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m;
+    const setores = this.cerebro.setores().filter(s => s.id !== ignorar).map(s => ({ x: s.x, y: s.y - ETIQUETA, w: s.w, h: s.h + ETIQUETA }));
+    const outros = [...this.ativas.keys()].filter(id => !ids.includes(id)).map(pos);
+    const centroDentro = (p, r) => p.x + p.w / 2 > r.x && p.x + p.w / 2 < r.x + r.w && p.y + p.h / 2 > r.y && p.y + p.h / 2 < r.y + r.h;
+    const r = caixa(ids.map(pos));
+    const comEtiqueta = { x: r.x, y: r.y - ETIQUETA, w: r.w, h: r.h + ETIQUETA };
+    if (!outros.some(p => centroDentro(p, r)) && !setores.some(s => encosta(comEtiqueta, s))) return { area: r, movidos: [] };
+    // junta numa grade: primeiro onde o grupo já está, senão à direita ou embaixo de tudo
+    const tams = ids.map(pos), w = Math.max(...tams.map(t => t.w)), h = Math.max(...tams.map(t => t.h));
+    const cols = Math.ceil(Math.sqrt(ids.length)), linhas = Math.ceil(ids.length / cols);
+    const larg = cols * w + (cols - 1) * VAO + 2 * FOLGA, alt = linhas * h + (linhas - 1) * VAO + 2 * FOLGA;
+    const ocupados = [...outros, ...setores];
+    const livre = (x, y) => !ocupados.some(o => encosta({ x, y: y - ETIQUETA, w: larg, h: alt + ETIQUETA }, o, 80));
+    const tudo = ocupados.length ? caixa([...ocupados, ...tams]) : r;
+    const candidatos = [[r.x, r.y], [tudo.x + tudo.w + 200, r.y], [r.x, tudo.y + tudo.h + 200 + ETIQUETA]];
+    let [ox, oy] = candidatos.find(([x, y]) => livre(x, y)) || [tudo.x + tudo.w + 200, tudo.y];
+    ox = Math.round(ox); oy = Math.round(oy);
+    const movidos = ids.map((id, i) => ({ id, x: ox + FOLGA + (i % cols) * (w + VAO), y: oy + FOLGA + Math.floor(i / cols) * (h + VAO), w: tams[i].w, h: tams[i].h }));
+    return { area: { x: ox, y: oy, w: larg, h: alt }, movidos };
+  }
+
+  criarSetor(de, { nome, cor, instrucao, agentes } = {}) {
+    if (!this.ehMaestro(de)) return 'Só o maestro cria setores. Peça à pessoa (ela desenha com o botão Setor no palco).';
+    nome = String(nome ?? '').trim().slice(0, 24);
+    if (!nome) return 'Dê um nome ao setor.';
+    const setores = this.cerebro.setores();
+    const igual = setores.find(s => s.nome.toLowerCase() === nome.toLowerCase());
+    if (igual) return `Já existe o setor ${igual.nome}. Para mudar, use editar_setor.`;
+    const a = this.agentesPorNome(agentes);
+    if (a.erro) return a.erro;
+    const usadas = new Set(setores.map(s => s.cor));
+    const hex = CORES_SETOR[cor] || Object.values(CORES_SETOR).find(c => !usadas.has(c)) || Object.values(CORES_SETOR)[setores.length % 6];
+    const { area, movidos } = this.areaEmVolta(a.ids);
+    for (const m of movidos) this.cerebro.posicaoSalvar(m.id, m.x, m.y, m.w, m.h);
+    const s = { id: `setor-${crypto.randomUUID().slice(0, 8)}`, nome, cor: hex, instrucao: String(instrucao ?? '').trim().slice(0, 2000), ...area };
+    this.cerebro.setorSalvar(s);
+    if (movidos.length) this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: movidos });
+    this.avisar({ tipo: 'setor', acao: 'salvo', setor: s });
+    const nomes = a.ids.map(id => this.nomeDe(id)).join(', ');
+    return `Criei o setor ${nome} com ${nomes}.${movidos.length ? ' Juntei os cartões deles num lugar livre, porque em volta de onde estavam o setor pegaria outros agentes ou encostaria noutro setor.' : ''}${s.instrucao ? ' A instrução do setor vai junto em cada tarefa que eles receberem.' : ''}`;
+  }
+
+  editarSetor(de, { setor, nome, cor, instrucao, agentes } = {}) {
+    if (!this.ehMaestro(de)) return 'Só o maestro muda setores.';
+    const setores = this.cerebro.setores();
+    const s = setores.find(x => x.nome.toLowerCase() === String(setor ?? '').trim().toLowerCase());
+    if (!s) return `Não há setor chamado "${setor}". ${setores.length ? `Setores: ${setores.map(x => x.nome).join(', ')}.` : 'O palco ainda não tem setores.'}`;
+    const novo = { ...s };
+    if (nome !== undefined && String(nome).trim()) {
+      novo.nome = String(nome).trim().slice(0, 24);
+      if (setores.some(x => x.id !== s.id && x.nome.toLowerCase() === novo.nome.toLowerCase())) return `Já existe outro setor chamado ${novo.nome}.`;
+    }
+    if (cor !== undefined) { if (!CORES_SETOR[cor]) return `Cor desconhecida: use ${Object.keys(CORES_SETOR).join(', ')}.`; novo.cor = CORES_SETOR[cor]; }
+    if (instrucao !== undefined) novo.instrucao = String(instrucao ?? '').trim().slice(0, 2000);
+    let movidos = [];
+    if (agentes !== undefined) {
+      const a = this.agentesPorNome(agentes);
+      if (a.erro) return a.erro;
+      const r = this.areaEmVolta(a.ids, s.id);
+      Object.assign(novo, r.area);
+      movidos = r.movidos;
+      for (const m of movidos) this.cerebro.posicaoSalvar(m.id, m.x, m.y, m.w, m.h);
+    }
+    this.cerebro.setorSalvar(novo);
+    if (movidos.length) this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: movidos });
+    this.avisar({ tipo: 'setor', acao: 'salvo', setor: novo });
+    const membros = [...this.ativas.keys()].filter(id => this.cerebro.setorDe(id)?.id === s.id).map(id => this.nomeDe(id));
+    return `Setor ${novo.nome} atualizado. Dentro dele: ${membros.length ? membros.join(', ') : 'ninguém'}.${movidos.length ? ' Juntei os cartões num lugar livre.' : ''}`;
+  }
+
+  removerSetor(de, { setor } = {}) {
+    if (!this.ehMaestro(de)) return 'Só o maestro remove setores.';
+    const s = this.cerebro.setores().find(x => x.nome.toLowerCase() === String(setor ?? '').trim().toLowerCase());
+    if (!s) return `Não há setor chamado "${setor}".`;
+    this.cerebro.setorApagar(s.id);
+    this.avisar({ tipo: 'setor', acao: 'removido', id: s.id });
+    return `Removi o setor ${s.nome}. Os agentes continuam no palco, só saíram do setor.`;
   }
 
   entregarArquivo(de, caminho, nome) {

@@ -1,5 +1,5 @@
 // As ferramentas do time (MCP): equipe, enviar, ver_tela, entregar_arquivo, as do maestro (criar_agente,
-// ligar, desligar, organizar_palco) e as dos fluxos.
+// ligar, desligar, organizar_palco e os setores) e as dos fluxos.
 // Cada janela manda o próprio id no cabeçalho X-Engram-Sessao.
 
 const VERSAO_MAXIMA = '2025-06-18';
@@ -43,6 +43,21 @@ function ferramentas(janelas) {
         modo: { type: 'string', enum: ['time', 'lista'] },
         posicoes: { type: 'array', items: { type: 'object', properties: { nome: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['nome', 'x', 'y'] }, description: 'só no modo lista' },
       }, ['modo']) },
+    { name: 'criar_setor', description: 'Só para o maestro, quando a pessoa pedir. Cria um setor no palco (uma área com nome, cor e instrução, como a pessoa desenha com o botão Setor) em volta dos agentes dados. Quem está dentro recebe a instrução do setor junto com cada tarefa, e o organizar_palco não tira ninguém de dentro. Se o retângulo em volta deles pegaria outro agente ou encostaria noutro setor, o Engram junta os cartões num lugar livre.',
+      inputSchema: objeto({
+        nome: { type: 'string', description: 'até 24 letras, ex.: Time NBS' },
+        agentes: { type: 'array', items: { type: 'string' }, description: 'nomes dos agentes que ficam dentro, como aparecem em equipe' },
+        instrucao: { type: 'string', description: 'o que esse setor faz e as regras dele (vai junto em cada tarefa)' },
+        cor: { type: 'string', enum: ['violeta', 'ciano', 'magenta', 'ambar', 'verde', 'coral'], description: 'sem cor, usa uma que ainda não está em uso' },
+      }, ['nome', 'agentes']) },
+    { name: 'editar_setor', description: 'Só para o maestro, quando a pessoa pedir. Muda nome, cor ou instrução de um setor; com agentes, refaz a área em volta deles (quem ficar fora sai do setor).',
+      inputSchema: objeto({
+        setor: { type: 'string', description: 'nome atual do setor' }, nome: { type: 'string', description: 'nome novo' },
+        instrucao: { type: 'string' }, cor: { type: 'string', enum: ['violeta', 'ciano', 'magenta', 'ambar', 'verde', 'coral'] },
+        agentes: { type: 'array', items: { type: 'string' } },
+      }, ['setor']) },
+    { name: 'remover_setor', description: 'Só para o maestro, quando a pessoa pedir. Tira um setor do palco; os agentes continuam onde estão.',
+      inputSchema: objeto({ setor: { type: 'string', description: 'nome do setor' } }, ['setor']) },
   ];
 }
 
@@ -76,6 +91,9 @@ async function tratar(janelas, sessao, m) {
         case 'ligar': return ok(texto(janelas.ligarJanelas(sessao, String(a.a ?? ''), String(a.b ?? ''))));
         case 'desligar': return ok(texto(janelas.desligarJanelas(sessao, String(a.a ?? ''), String(a.b ?? ''), a.confirmar_revisao === true)));
         case 'organizar_palco': return ok(texto(janelas.organizarPalco(sessao, String(a.modo || ''), a.posicoes)));
+        case 'criar_setor': return ok(texto(janelas.criarSetor(sessao, a)));
+        case 'editar_setor': return ok(texto(janelas.editarSetor(sessao, a)));
+        case 'remover_setor': return ok(texto(janelas.removerSetor(sessao, a)));
         default: return { jsonrpc: '2.0', id: m.id, error: { code: -32602, message: `ferramenta desconhecida: ${p.name}` } };
       }
     } catch (e) {
