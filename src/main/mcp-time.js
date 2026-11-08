@@ -32,12 +32,13 @@ function ferramentas(janelas) {
         nome: { type: 'string' }, papel: { type: 'string', enum: papeis },
         agente: { type: 'string', enum: agentes.map(p => p.id), description: 'qual CLI de agente abrir' },
         modelo: { type: 'string', description: 'id do modelo (vazio = padrão do agente)' }, tarefa: { type: 'string' },
+        setor: { type: 'string', description: 'nome de um setor do palco (veja em equipe): o agente nasce dentro dele e recebe a instrução do setor' },
       }, ['nome', 'papel']) },
     { name: 'ligar', description: 'Só para o maestro. Liga duas janelas abertas no palco com uma linha, como a pessoa faz arrastando, para elas conversarem pelo enviar. Use os nomes como aparecem em equipe; uma das pontas pode ser você.',
       inputSchema: objeto({ a: { type: 'string', description: 'nome de uma ponta' }, b: { type: 'string', description: 'nome da outra ponta' } }, ['a', 'b']) },
     { name: 'desligar', description: 'Só para o maestro. Tira a linha entre duas janelas: elas deixam de conversar. Se a ligação tiver revisão, ela sai junto, então o Engram recusa até você confirmar com a pessoa (confirmar_revisao=true). A resposta avisa se algum colega ficou sem caminho até você.',
       inputSchema: objeto({ a: { type: 'string' }, b: { type: 'string' }, confirmar_revisao: { type: 'boolean', description: 'só depois de a pessoa concordar em apagar a revisão da ligação' } }, ['a', 'b']) },
-    { name: 'organizar_palco', description: 'Só para o maestro, e só quando a pessoa pedir para organizar ou arrumar o palco: nunca por conta própria, porque muda a posição que ela deixou nos cartões. Modo "time": você no centro e os colegas em volta, agrupados por papel. Modo "lista": posições dadas por você, em posicoes [{ nome, x, y }] (pixels do palco, o seu cartão em 0,0 fica no centro). Depois a tela enquadra o time.',
+    { name: 'organizar_palco', description: 'Só para o maestro, e só quando a pessoa pedir para organizar ou arrumar o palco: nunca por conta própria, porque muda a posição que ela deixou nos cartões. Modo "time": você no centro e os colegas em volta, agrupados por papel; quem está dentro de um setor fica onde está. Modo "lista": posições dadas por você, em posicoes [{ nome, x, y }] (pixels do palco, o seu cartão em 0,0 fica no centro). Depois a tela enquadra o time.',
       inputSchema: objeto({
         modo: { type: 'string', enum: ['time', 'lista'] },
         posicoes: { type: 'array', items: { type: 'object', properties: { nome: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['nome', 'x', 'y'] }, description: 'só no modo lista' },
@@ -71,7 +72,7 @@ async function tratar(janelas, sessao, m) {
         case 'fluxo_desenhar': return ok(texto(janelas.fluxos.desenhar(sessao, a.fluxo)));
         case 'fluxo_marcar': return ok(texto(janelas.fluxos.marcar(sessao, a)));
         case 'entregar_arquivo': return ok(texto(janelas.entregarArquivo(sessao, String(a.caminho || ''), a.nome)));
-        case 'criar_agente': return ok(texto(await janelas.criarAgente(sessao, String(a.nome || ''), String(a.papel || 'livre'), String(a.modelo || ''), a.tarefa, a.agente ? String(a.agente) : null)));
+        case 'criar_agente': return ok(texto(await janelas.criarAgente(sessao, String(a.nome || ''), String(a.papel || 'livre'), String(a.modelo || ''), a.tarefa, a.agente ? String(a.agente) : null, a.setor ? String(a.setor) : '')));
         case 'ligar': return ok(texto(janelas.ligarJanelas(sessao, String(a.a ?? ''), String(a.b ?? ''))));
         case 'desligar': return ok(texto(janelas.desligarJanelas(sessao, String(a.a ?? ''), String(a.b ?? ''), a.confirmar_revisao === true)));
         case 'organizar_palco': return ok(texto(janelas.organizarPalco(sessao, String(a.modo || ''), a.posicoes)));

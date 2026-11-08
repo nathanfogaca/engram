@@ -1,0 +1,115 @@
+/* Setores do palco: áreas com nome e cor, atrás das linhas e dos cartões. Só a etiqueta e o canto
+   respondem ao mouse: arrastar o fundo, mesmo dentro de um setor, continua movendo o palco. */
+
+#setores { position: absolute; left: 0; top: 0; }
+.setor { --sc: #8b7bff; position: absolute; pointer-events: none; }
+.setor-fundo {
+  position: absolute; inset: 0; border-radius: 26px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--sc) 11%, transparent), color-mix(in srgb, var(--sc) 4%, transparent));
+  border: 1.5px dashed color-mix(in srgb, var(--sc) 55%, transparent);
+  box-shadow: inset 0 0 90px color-mix(in srgb, var(--sc) 9%, transparent), 0 0 44px -10px color-mix(in srgb, var(--sc) 35%, transparent);
+  transition: background .3s, box-shadow .3s, border-color .3s;
+}
+.setor.nasce .setor-fundo { animation: setor-nasce .9s var(--mola) both; }
+@keyframes setor-nasce { from { opacity: 0; transform: scale(.94); } }
+.setor.saindo { animation: setor-sai .38s var(--suave) forwards; }
+@keyframes setor-sai { to { opacity: 0; transform: scale(.97); } }
+/* um cartão vai cair neste setor */
+.setor.alvo .setor-fundo {
+  border-style: solid; border-color: var(--sc); background: color-mix(in srgb, var(--sc) 17%, transparent);
+  box-shadow: inset 0 0 130px color-mix(in srgb, var(--sc) 22%, transparent), 0 0 80px -6px color-mix(in srgb, var(--sc) 65%, transparent);
+}
+.setor.movendo .setor-fundo { border-style: solid; box-shadow: inset 0 0 110px color-mix(in srgb, var(--sc) 18%, transparent), 0 0 70px -8px color-mix(in srgb, var(--sc) 55%, transparent); }
+.setor.movendo.so-area .setor-fundo { border-style: dashed; background: color-mix(in srgb, var(--sc) 7%, transparent); }
+
+.setor-etiqueta {
+  position: absolute; left: 16px; bottom: calc(100% + 9px); pointer-events: auto; display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px 6px 12px; border-radius: 13px; cursor: grab; user-select: none; white-space: nowrap;
+  transform-origin: left bottom; transform: scale(var(--zi, 1));
+  background: color-mix(in srgb, var(--sc) 20%, rgb(var(--superficie))); border: 1px solid color-mix(in srgb, var(--sc) 55%, transparent);
+  box-shadow: 0 0 28px -4px color-mix(in srgb, var(--sc) 60%, transparent); color: var(--texto-forte);
+}
+.setor-etiqueta:active { cursor: grabbing; }
+.setor-etiqueta .ponto { width: 10px; height: 10px; border-radius: 50%; background: var(--sc); box-shadow: 0 0 10px var(--sc); }
+.setor-etiqueta b { font-weight: 750; letter-spacing: .05em; font-size: 15px; }
+.setor-etiqueta .qtd { font-size: 12px; color: var(--discreto); }
+.setor-etiqueta button { display: none; width: 24px; height: 24px; border: 0; border-radius: 8px; background: none; color: var(--discreto); cursor: pointer; }
+.setor-etiqueta:hover button { display: inline-block; }
+.setor-etiqueta button:hover { background: rgb(var(--tinta) / .1); color: var(--texto-forte); }
+.setor-marca {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-weight: 850; letter-spacing: .06em; line-height: 1; white-space: nowrap;
+  color: var(--sc); opacity: 0; transition: opacity .5s; pointer-events: none; text-shadow: 0 0 40px var(--sc);
+}
+#palco.setores-longe .setor-marca { opacity: .3; }
+.setor-canto {
+  position: absolute; right: -8px; bottom: -8px; width: 20px; height: 20px; border-radius: 7px; pointer-events: auto; cursor: nwse-resize;
+  background: var(--sc); box-shadow: 0 0 14px var(--sc); opacity: 0; transition: opacity .2s;
+}
+.setor:hover .setor-canto, .setor.redimensionando .setor-canto { opacity: .9; }
+
+/* o rascunho enquanto desenha */
+.setor.rascunho .setor-fundo { border: 2px dashed rgb(var(--acento2)); background: rgb(var(--acento2) / .08); box-shadow: 0 0 44px -6px rgb(var(--acento2) / .6); }
+.setor-medida { position: absolute; right: 12px; bottom: 9px; font: 12px var(--mono); color: rgb(var(--acento2)); }
+#palco.desenhando-setor, #palco.desenhando-setor .grade { cursor: crosshair; }
+#palco.desenhando-setor .grade { background-image: radial-gradient(circle at center, rgb(var(--acento2) / .3) 1.2px, transparent 1.8px); }
+
+/* o selo do setor no cartão */
+.chip-setor {
+  display: none; flex: none; font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  color: var(--sc); background: color-mix(in srgb, var(--sc) 16%, transparent); border: 1px solid color-mix(in srgb, var(--sc) 45%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--sc) 30%, transparent);
+}
+.chip-setor.on { display: inline-block; }
+.chip-setor.chegou { animation: chip-setor .6s var(--mola); }
+@keyframes chip-setor { from { transform: scale(.4); opacity: 0; } }
+.cartao.selecionado { box-shadow: 0 0 0 2px rgb(var(--acento2)), 0 0 70px -4px rgb(var(--acento2) / .6), 0 28px 70px rgba(0, 0, 0, .6); }
+
+/* botão Setor na barra do palco */
+.btn-setor {
+  display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; margin-right: 4px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--borda); background: rgb(var(--tinta) / .05); color: var(--texto); font-weight: 600; transition: background .2s, box-shadow .3s, border-color .3s;
+}
+.btn-setor:hover { background: rgb(var(--tinta) / .1); }
+.btn-setor .ico { width: 14px; height: 11px; border: 1.5px dashed currentColor; border-radius: 4px; }
+.btn-setor kbd { font: 10.5px var(--mono); padding: 0 5px; border-radius: 6px; border: 1px solid var(--borda-forte); color: var(--discreto); }
+.btn-setor.ligado { color: var(--texto-forte); border-color: rgb(var(--acento2) / .7); background: rgb(var(--acento2) / .2); box-shadow: 0 0 22px rgb(var(--acento2) / .45); }
+
+.setor-dica {
+  position: absolute; left: 50%; top: 84px; z-index: 7; transform: translate(-50%, -10px); opacity: 0; pointer-events: none;
+  transition: opacity .3s, transform .3s var(--mola); padding: 8px 16px; border-radius: 12px; font-size: 13px;
+  background: rgb(var(--acento2) / .16); border: 1px solid rgb(var(--acento2) / .5); color: var(--texto-forte); box-shadow: 0 0 30px rgb(var(--acento2) / .3);
+}
+.setor-dica.on { opacity: 1; transform: translate(-50%, 0); }
+.setor-dica kbd { font: 11px var(--mono); padding: 1px 6px; border-radius: 6px; border: 1px solid rgb(var(--tinta) / .3); }
+
+.setor-agrupar {
+  position: absolute; z-index: 7; display: none; transform: translate(-50%, -100%); padding: 7px 14px; border-radius: 12px; cursor: pointer; font-weight: 600;
+  border: 1px solid rgb(var(--acento2) / .6); background: rgb(var(--superficie) / .94); color: var(--texto-forte); box-shadow: 0 0 30px rgb(var(--acento2) / .4);
+}
+.setor-agrupar.on { display: block; animation: chip-setor .4s var(--mola); }
+
+/* nome, cor e instrução */
+.setor-pop {
+  --pc: #8b7bff; position: fixed; z-index: 40; width: 350px; padding: 16px; border-radius: 18px;
+  background: rgb(var(--superficie-alta) / .97); border: 1px solid var(--borda-forte); backdrop-filter: blur(24px);
+  box-shadow: 0 30px 80px rgb(0 0 0 / .6), 0 0 50px -10px var(--pc); animation: setor-pop .35s var(--mola);
+}
+.setor-pop[hidden] { display: none; }
+@keyframes setor-pop { from { opacity: 0; transform: translateY(8px) scale(.96); } }
+.setor-pop h3 { margin: 0 0 10px; font-size: 12px; color: var(--discreto); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.setor-pop input, .setor-pop textarea {
+  width: 100%; box-sizing: border-box; border-radius: 11px; border: 1px solid var(--borda-forte); background: rgb(var(--poco) / .35);
+  color: var(--texto-forte); font: inherit; padding: 9px 12px; outline: none;
+}
+.setor-pop input { font-size: 18px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.setor-pop input:focus, .setor-pop textarea:focus { border-color: var(--pc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pc) 25%, transparent); }
+.setor-pop textarea { margin-top: 10px; height: 70px; resize: none; font-size: 12.5px; }
+.setor-cores { display: flex; gap: 9px; margin: 12px 0 2px; }
+.setor-cores .cor { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; background: var(--c); cursor: pointer; box-shadow: 0 0 10px var(--c); transition: transform .2s var(--mola); }
+.setor-cores .cor.on { border-color: #fff; transform: scale(1.15); }
+.setor-nota { margin: 8px 2px 0; font-size: 11.5px; color: var(--apagado); }
+.setor-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.setor-ok {
+  padding: 8px 16px; border: 0; border-radius: 11px; cursor: pointer; font-weight: 700; color: #0b0d12;
+  background: linear-gradient(90deg, var(--pc), color-mix(in srgb, var(--pc) 60%, #fff)); box-shadow: 0 8px 26px color-mix(in srgb, var(--pc) 45%, transparent);
+}

@@ -37,7 +37,40 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
     return {
       janelas: [...abertas].map(id => janelas.info(id)),
       conexoes: cerebro.conexoes().filter(c => abertas.has(c.a) && abertas.has(c.b)),
+      setores: cerebro.setores(),
     };
+  });
+  // setores do palco: áreas com nome, cor e instrução; o centro do cartão dentro = faz parte
+  const setorValido = (b, atual = {}) => {
+    const nome = String(b.nome ?? atual.nome ?? '').trim().slice(0, 24);
+    exigir(nome, 400, 'o setor precisa de um nome');
+    const cor = String(b.cor ?? atual.cor ?? '#8b7bff');
+    exigir(/^#[0-9a-f]{6}$/i.test(cor), 400, 'cor inválida');
+    const num = (v, padrao, min, max) => (Number.isFinite(Number(v)) ? Math.max(min, Math.min(Number(v), max)) : padrao);
+    return {
+      nome, cor, instrucao: String(b.instrucao ?? atual.instrucao ?? '').trim().slice(0, 2000),
+      x: num(b.x, atual.x ?? 0, -1e6, 1e6), y: num(b.y, atual.y ?? 0, -1e6, 1e6),
+      w: num(b.w, atual.w ?? 900, 200, 20000), h: num(b.h, atual.h ?? 600, 140, 20000),
+    };
+  };
+  rota('GET', '/api/setores', () => cerebro.setores());
+  rota('POST', '/api/setores', (_, b) => {
+    const s = { id: `setor-${require('node:crypto').randomUUID().slice(0, 8)}`, ...setorValido(b) };
+    cerebro.setorSalvar(s);
+    janelas.avisar({ tipo: 'setor', acao: 'salvo', setor: s });
+    return s;
+  });
+  rota('PUT', '/api/setores/:id', (p, b) => {
+    const atual = cerebro.setor(p.id);
+    exigir(atual, 404, 'setor não encontrado');
+    const s = { id: p.id, ...setorValido(b, atual) };
+    cerebro.setorSalvar(s);
+    janelas.avisar({ tipo: 'setor', acao: 'salvo', setor: s });
+    return s;
+  });
+  rota('POST', '/api/setores/:id/remover', p => {
+    if (cerebro.setorApagar(p.id)) janelas.avisar({ tipo: 'setor', acao: 'removido', id: p.id });
+    return { ok: true };
   });
   rota('POST', '/api/conexoes', (_, b) => {
     exigir(b.a && b.b && b.a !== b.b && janelas.ativas.has(b.a) && janelas.ativas.has(b.b), 400, 'as duas pontas têm de ser janelas abertas e diferentes');

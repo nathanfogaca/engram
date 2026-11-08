@@ -230,6 +230,21 @@ class Cerebro {
   }
   posicaoSalvar(id, x, y, w, h) { this.q('INSERT OR REPLACE INTO posicoes VALUES (?,?,?,?,?)').run(id, x, y, w, h); }
   posicao(id) { const r = this.q('SELECT x, y, w, h FROM posicoes WHERE id = ?').get(id); return r ? { ...r } : null; }
+  // setores do palco: áreas com nome e cor; quem tem o centro do cartão dentro faz parte
+  setores() { return this.q('SELECT id, nome, cor, instrucao, x, y, w, h FROM setores ORDER BY criado').all().map(r => ({ ...r })); }
+  setor(id) { const r = this.q('SELECT id, nome, cor, instrucao, x, y, w, h FROM setores WHERE id = ?').get(id); return r ? { ...r } : null; }
+  setorSalvar(s) {
+    this.q('INSERT INTO setores (id, nome, cor, instrucao, x, y, w, h, criado) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome = excluded.nome, cor = excluded.cor, instrucao = excluded.instrucao, x = excluded.x, y = excluded.y, w = excluded.w, h = excluded.h')
+      .run(s.id, s.nome, s.cor, s.instrucao || '', s.x, s.y, s.w, s.h, agora());
+  }
+  setorApagar(id) { return this.q('DELETE FROM setores WHERE id = ?').run(id).changes > 0; }
+  /** O setor de uma janela: o menor que contém o centro do cartão dela (ou null). */
+  setorDe(id, setores = this.setores()) {
+    const p = this.posicao(id);
+    if (!p) return null;
+    const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+    return setores.filter(s => cx > s.x && cx < s.x + s.w && cy > s.y && cy < s.y + s.h).sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
+  }
   mensagemRegistrar(de, para, texto) { return Number(this.q('INSERT INTO mensagens (de, para, quando, texto) VALUES (?,?,?,?)').run(de, para, agora(), texto).lastInsertRowid); }
   mensagemEntregue(n) { this.q('UPDATE mensagens SET entregue = ? WHERE n = ?').run(agora(), n); }
   mensagensNoPar(a, b, minutos = 10) {

@@ -7,6 +7,7 @@ import {
   limitar, avisar, movimentoReduzido,
 } from "./util.js";
 import { Conversa } from "./conversa.js";
+import { Setores } from "./setores.js";
 
 const TAM = { w: 700, h: 470 };
 const ROTULO = {
@@ -37,6 +38,7 @@ export class Palco {
     this.aoRetomar = aoRetomar;
     this.aoLer = aoLer;
     this.instalar();
+    this.setores = new Setores(this);
     this.aplicar();
     this.atualizarVazio();
   }
@@ -83,6 +85,7 @@ export class Palco {
     this.grade.style.setProperty("--gx", `${x}px`);
     this.grade.style.setProperty("--gy", `${y}px`);
     $("#zoom-pct").textContent = `${Math.round(z * 100)}%`;
+    this.setores?.aoCamera(z);
   }
 
   telaParaMundo(x, y) {
@@ -116,12 +119,14 @@ export class Palco {
   }
 
   enquadrar(animado = true) {
-    const lista = [...this.cartoes.values()];
+    const lista = [...this.cartoes.values(), ...(this.setores?.caixas() || [])];
     if (!lista.length) return;
     const x1 = Math.min(...lista.map(c => c.x)), y1 = Math.min(...lista.map(c => c.y));
     const x2 = Math.max(...lista.map(c => c.x + c.w)), y2 = Math.max(...lista.map(c => c.y + c.h));
-    const z = limitar(Math.min((innerWidth - 120) / (x2 - x1), (innerHeight - 200) / (y2 - y1), 1), 0.15, 1);
-    this.v = { z, x: innerWidth / 2 - ((x1 + x2) / 2) * z, y: (innerHeight + 50) / 2 - ((y1 + y2) / 2) * z };
+    // as etiquetas dos setores ficam acima deles e não encolhem com o zoom: reserva espaço na tela
+    const etiqueta = this.setores?.lista.size ? 90 : 0;
+    const z = limitar(Math.min((innerWidth - 120) / (x2 - x1), (innerHeight - 200 - etiqueta) / (y2 - y1), 1), 0.15, 1);
+    this.v = { z, x: innerWidth / 2 - ((x1 + x2) / 2) * z, y: (innerHeight + 50 + etiqueta) / 2 - ((y1 + y2) / 2) * z };
     this.aplicar(animado);
   }
 
@@ -134,6 +139,7 @@ export class Palco {
     const fim = () => {
       for (const { c } of voos) this.ajustarTerm(c);
       this.redesenharFios();
+      this.setores.atualizarMembros();
       this.enquadrar(true);
     };
     if (movimentoReduzido) {
@@ -169,7 +175,14 @@ export class Palco {
   // ---------------------------------------------------------------- gestos
 
   apertar(e) {
-    const fundo = !e.target.closest(".cartao, .lembranca, .hud, .hero, .fio");
+    const fundo = !e.target.closest(".cartao, .lembranca, .hud, .hero, .fio, .setor-etiqueta, .setor-canto, .setor-pop, .setor-agrupar");
+    if (e.button === 0 && fundo) this.setores.limparSelecao();
+    // setor: no modo Setor (botão ou S) ou com Shift; sem isso, arrastar o fundo continua movendo o palco
+    if (e.button === 0 && fundo && (this.setores.modo || e.shiftKey)) {
+      e.preventDefault();
+      this.setores.comecarDesenho(e);
+      return;
+    }
     if (e.button === 1 || (e.button === 0 && fundo)) {
       this.gesto = { tipo: "pan", x: e.clientX, y: e.clientY, vx: this.v.x, vy: this.v.y };
       this.raiz.classList.add("arrastando");
@@ -190,6 +203,7 @@ export class Palco {
       g.c.y = g.cy + dy / this.v.z;
       this.posicionar(g.c);
       this.redesenharFios(g.c.id);
+      this.setores.aoMoverCartao(g.c);
     } else if (g.tipo === "redim") {
       g.c.w = Math.max(420, g.cw + dx / this.v.z);
       g.c.h = Math.max(300, g.ch + dy / this.v.z);
@@ -210,6 +224,7 @@ export class Palco {
     if (g.tipo === "mover" || g.tipo === "redim") {
       if (g.tipo === "redim") this.ajustarTerm(g.c);
       this.salvarPosicao(g.c);
+      this.setores.aoSoltarCartao();
     } else if (g.tipo === "ligar") {
       this.terminarLigacao(g);
     }
@@ -227,11 +242,12 @@ export class Palco {
 
   // ---------------------------------------------------------------- cartões
 
-  carregar({ janelas, conexoes }) {
+  carregar({ janelas, conexoes, setores }) {
     janelas.forEach((info, i) => {
       const c = this.adicionar(info);
       if (c) c.el.style.animationDelay = `${i * 90}ms`;
     });
+    this.setores.carregar(setores);
     setTimeout(() => {
       for (const { a, b, revisa } of conexoes) { this.ligar(a, b, { nascendo: true }); if (revisa) this.marcarRevisao(a, b, revisa); }
     }, janelas.length * 90 + 350);
@@ -297,10 +313,12 @@ export class Palco {
     this.cartoes.set(info.id, c);
     this.trazerFrente(c);
     this.ligarPendentes(info.id);
+    this.setores.atualizarMembros(false);
 
     cab.addEventListener("pointerdown", e => {
       if (e.button !== 0 || e.target.closest("button")) return;
       e.stopPropagation();
+      if (e.ctrlKey || e.metaKey) { this.setores.alternarSelecao(c); return; } // Ctrl + clique: seleciona para agrupar num setor
       this.gesto = { tipo: "mover", c, x: e.clientX, y: e.clientY, cx: c.x, cy: c.y };
     });
     cab.addEventListener("dblclick", e => { if (!e.target.closest("button")) this.focar(c.id); });
@@ -440,6 +458,8 @@ export class Palco {
     if (!c) return;
     for (const f of [...this.fios.values()]) if (f.a === id || f.b === id) this.desligarLocal(f.a, f.b);
     this.cartoes.delete(id);
+    this.setores.selecao.delete(id);
+    this.setores.atualizarMembros(false);
     c.ws?.fechar();
     c.el.style.transition = "transform .45s var(--suave), opacity .45s";
     c.el.style.transform = "scale(.88)";

@@ -529,7 +529,7 @@ class Janelas {
   descricao(id) {
     const s = this.cerebro.sessao(id) || {};
     const j = this.ativas.get(id);
-    return {
+    const d = {
       nome: s.nome,
       papel: this.cfg.papeis[s.papel]?.nome || s.papel,
       agente: this.provedores.adaptador(s.provedor || 'claude')?.nome || s.provedor,
@@ -537,6 +537,35 @@ class Janelas {
       estado: j ? j.estado : 'encerrada',
       mensagens_na_fila: j ? j.caixa.length : 0,
     };
+    const setor = this.cerebro.setorDe(id);
+    if (setor) d.setor = setor.nome;
+    return d;
+  }
+
+  /** Os setores do palco com quem está em cada um (para o maestro distribuir o trabalho). */
+  setoresDoPalco() {
+    const setores = this.cerebro.setores();
+    if (!setores.length) return null;
+    const membros = new Map(setores.map(s => [s.id, []]));
+    for (const id of this.ativas.keys()) { const s = this.cerebro.setorDe(id, setores); if (s) membros.get(s.id).push(this.nomeDe(id)); }
+    return setores.map(s => ({ nome: s.nome, ...(s.instrucao ? { instrucao: s.instrucao } : {}), agentes: membros.get(s.id).sort() }));
+  }
+
+  /** Lugar livre para um cartão novo dentro do setor; se não couber, o setor cresce para baixo. */
+  lugarNoSetor(setor) {
+    const [w, h] = TAMANHO_PADRAO, folga = 50;
+    const ocupados = [...this.ativas.keys()].map(i => this.cerebro.posicao(i)).filter(Boolean);
+    const livre = (x, y) => !ocupados.some(p => x < p.x + p.w + 30 && p.x < x + w + 30 && y < p.y + p.h + 30 && p.y < y + h + 30);
+    for (let y = setor.y + folga; y + h <= setor.y + setor.h - folga / 2; y += 60) {
+      for (let x = setor.x + folga; x + w <= setor.x + setor.w - folga / 2; x += 60) if (livre(x, y)) return { x, y, w, h };
+    }
+    // não coube: abre espaço embaixo, sem cortar ninguém
+    const fundo = Math.max(setor.y + setor.h, ...ocupados.filter(p => p.x < setor.x + setor.w && p.x + p.w > setor.x && p.y < setor.y + setor.h).map(p => p.y + p.h));
+    const y = fundo + 40;
+    const novo = { ...setor, w: Math.max(setor.w, w + 2 * folga), h: y + h + folga - setor.y };
+    this.cerebro.setorSalvar(novo);
+    this.avisar({ tipo: 'setor', acao: 'salvo', setor: novo });
+    return { x: setor.x + folga, y, w, h };
   }
 
   /** Com quem esta janela fala (ligações com janelas abertas), pelos nomes. */
@@ -552,7 +581,11 @@ class Janelas {
       // o maestro enxerga o palco inteiro, para ligar quem ainda não está no time
       const fora = [...this.ativas.keys()].filter(c => c !== id && !this.cerebro.conectados(id).has(c)).sort().map(comLigacoes);
       if (fora.length) r.no_palco_sem_ligacao_com_voce = fora;
+      const setores = this.setoresDoPalco();
+      if (setores) r.setores = { explicacao: 'Áreas que a pessoa desenhou no palco. Mande cada tarefa para quem é do setor certo; quem recebe já vê a instrução do setor dele.', lista: setores };
     }
+    const meu = this.cerebro.setorDe(id);
+    if (meu?.instrucao) r.instrucao_do_seu_setor = meu.instrucao;
     const revisor = this.revisorAtivo(id);
     if (revisor) r.suas_entregas_passam_por = `${this.cerebro.sessao(revisor).nome} (tudo o que você mandar vai para ele revisar antes de seguir)`;
     const revisados = this.cerebro.revisados(id).filter(x => this.ativas.has(x)).map(x => this.cerebro.sessao(x).nome);
@@ -621,14 +654,19 @@ class Janelas {
     return this.ativas.get(alvo).tela.texto(Math.max(10, Math.min(Number(linhas) || 60, 200))) || '(tela vazia)';
   }
 
-  async criarAgente(de, nome, papel, modelo, tarefa, provedor = null) {
+  async criarAgente(de, nome, papel, modelo, tarefa, provedor = null, nomeSetor = '') {
     const s = this.cerebro.sessao(de);
     if (!s || s.papel !== 'maestro') return 'Só o maestro cria agentes.';
     if (papel === 'maestro') return 'O time tem um maestro só.';
+    let setor = null;
+    if (nomeSetor) {
+      setor = this.cerebro.setores().find(x => x.nome.toLowerCase() === String(nomeSetor).trim().toLowerCase());
+      if (!setor) return `Não há setor chamado "${nomeSetor}" no palco. ${this.setoresDoPalco() ? `Setores: ${this.setoresDoPalco().map(x => x.nome).join(', ')}.` : 'A pessoa ainda não desenhou setores.'}`;
+    }
     try {
-      const info = await this.abrir({ nome, modelo, papel, provedor: provedor || s.provedor || 'claude', ligarA: de, tarefa: tarefa && String(tarefa).trim() ? [de, String(tarefa).trim()] : null });
+      const info = await this.abrir({ nome, modelo, papel, provedor: provedor || s.provedor || 'claude', ligarA: de, posicao: setor ? this.lugarNoSetor(setor) : null, tarefa: tarefa && String(tarefa).trim() ? [de, String(tarefa).trim()] : null });
       const d = this.descricao(info.id);
-      return `Criei ${info.nome} (${d.papel}, ${d.agente}, ${d.modelo}), já ligado a você.${tarefa ? ' A tarefa entra assim que ele estiver pronto.' : ''}`;
+      return `Criei ${info.nome} (${d.papel}, ${d.agente}, ${d.modelo})${setor ? ` no setor ${setor.nome}` : ''}, já ligado a você.${tarefa ? ' A tarefa entra assim que ele estiver pronto.' : ''}`;
     } catch (e) {
       return `Não deu para criar: ${e.message}.`;
     }
@@ -706,33 +744,49 @@ class Janelas {
       }
       if (desconhecidos.length) return `Não mexi em nada: não há janela aberta chamada ${desconhecidos.map(n => `"${n}"`).join(', ')}. Veja os nomes com equipe.`;
     } else if (modo === 'time') {
+      // quem está num setor fica onde está (o setor é a arrumação da pessoa); os setores viram obstáculos
+      const setores = this.cerebro.setores();
+      const noSetor = id => !!this.cerebro.setorDe(id, setores);
       const papelDe = id => this.cerebro.sessao(id)?.papel || 'livre';
-      const colegas = [...this.ativas.keys()].filter(id => id !== de)
+      const colegas = [...this.ativas.keys()].filter(id => id !== de && !noSetor(id))
         .sort((x, y) => papelDe(x).localeCompare(papelDe(y)) || this.nomeDe(x).localeCompare(this.nomeDe(y)));
+      if (!colegas.length) return 'Nada para arrumar: todos os colegas estão dentro de setores, e eles ficam onde a pessoa deixou.';
+      // o maestro fica onde está e vira o centro (assim ele não cai em cima de um setor)
       const [mw, mh] = tamanho(de);
-      novas.push({ id: de, x: Math.round(-mw / 2), y: Math.round(-mh / 2), w: mw, h: mh });
+      const pm = this.cerebro.posicao(de);
+      const centro = pm ? { x: pm.x + pm.w / 2, y: pm.y + pm.h / 2 } : { x: 0, y: 0 };
+      const maestro = { id: de, x: Math.round(centro.x - mw / 2), y: Math.round(centro.y - mh / 2), w: mw, h: mh };
+      if (!pm) novas.push(maestro);
+      const obstaculos = [maestro, ...setores.map(s => ({ x: s.x, y: s.y - 60, w: s.w, h: s.h + 60 }))]; // 60: a etiqueta em cima
       if (colegas.length) {
         // colegas numa elipse em volta do maestro, os do mesmo papel lado a lado; abre a elipse até ninguém encostar
         const tams = colegas.map(tamanho);
         const maiorW = Math.max(mw, ...tams.map(t => t[0])), maiorH = Math.max(mh, ...tams.map(t => t[1]));
+        const encosta = (r1, r2) => r1.x < r2.x + r2.w + 60 && r2.x < r1.x + r1.w + 60 && r1.y < r2.y + r2.h + 60 && r2.y < r1.y + r1.h + 60;
         let rx = maiorW + 160, ry = maiorH + 120, lugares = null;
-        for (let tentativa = 0; tentativa < 30 && !lugares; tentativa++, rx *= 1.1, ry *= 1.1) {
+        for (let tentativa = 0; tentativa < 40 && !lugares; tentativa++, rx *= 1.1, ry *= 1.1) {
           const p = colegas.map((id, i) => {
             const ang = -Math.PI / 2 + (2 * Math.PI * i) / colegas.length;
             const [w, h] = tams[i];
-            return { id, x: Math.round(rx * Math.cos(ang) - w / 2), y: Math.round(ry * Math.sin(ang) - h / 2), w, h };
+            return { id, x: Math.round(centro.x + rx * Math.cos(ang) - w / 2), y: Math.round(centro.y + ry * Math.sin(ang) - h / 2), w, h };
           });
-          const todos = [novas[0], ...p];
-          const bate = todos.some((r1, i) => todos.some((r2, j) => j > i && r1.x < r2.x + r2.w + 60 && r2.x < r1.x + r1.w + 60 && r1.y < r2.y + r2.h + 60 && r2.y < r1.y + r1.h + 60));
+          const bate = p.some((r1, i) => p.some((r2, j) => j > i && encosta(r1, r2)) || obstaculos.some(o => encosta(r1, o)));
           if (!bate) lugares = p;
         }
-        novas.push(...(lugares || colegas.map((id, i) => ({ id, x: (i % 3) * (maiorW + 160) - maiorW, y: (Math.floor(i / 3) + 1) * (maiorH + 120), w: tams[i][0], h: tams[i][1] }))));
+        if (!lugares) {
+          // não achou elipse livre: uma fileira embaixo de tudo
+          const fundo = Math.max(...obstaculos.map(o => o.y + o.h)) + 140;
+          lugares = colegas.map((id, i) => ({ id, x: Math.round(centro.x + (i - (colegas.length - 1) / 2) * (maiorW + 120) - tams[i][0] / 2), y: fundo, w: tams[i][0], h: tams[i][1] }));
+        }
+        novas.push(...lugares);
       }
     } else return 'Modo desconhecido: use "time" ou "lista".';
     for (const n of novas) this.cerebro.posicaoSalvar(n.id, n.x, n.y, n.w, n.h);
     this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: novas });
     if (modo === 'lista') return `Movi ${novas.length === 1 ? '1 cartão' : `${novas.length} cartões`} no palco.`;
-    return `Organizei o palco: você no centro e ${novas.length - 1 === 1 ? '1 colega' : `${novas.length - 1} colegas`} em volta, agrupados por papel.`;
+    const movidos = novas.filter(n => n.id !== de).length;
+    const emSetor = [...this.ativas.keys()].filter(id => id !== de && this.cerebro.setorDe(id)).length;
+    return `Organizei o palco: ${movidos === 1 ? '1 colega' : `${movidos} colegas`} em volta de você, agrupados por papel.${emSetor ? ` ${emSetor === 1 ? 'O colega que está num setor ficou' : `Os ${emSetor} que estão em setores ficaram`} onde a pessoa deixou.` : ''}`;
   }
 
   entregarArquivo(de, caminho, nome) {
@@ -755,7 +809,10 @@ class Janelas {
     const dica = revisor && revisor !== de
       ? `Quando terminar, entregue o resultado com mcp__engram__enviar para="${this.cerebro.sessao(revisor).nome}": suas entregas passam por ele, que revisa antes de levar a ${r.nome}. Dúvidas sobre a tarefa também vão para ele.`
       : `Para responder, use mcp__engram__enviar com para="${r.nome}".`;
-    return `[Engram · mensagem de ${r.nome} (${r.papel}, ${r.modelo})]\n${texto}\n\n(${dica})`;
+    // quem recebe está num setor com instrução: ela vai junto, sempre a atual (o setor pode mudar de nome ou de regra)
+    const setor = para ? this.cerebro.setorDe(para) : null;
+    const doSetor = setor?.instrucao ? `\n\n(Você está no setor ${setor.nome} do palco. Instrução do setor: ${setor.instrucao})` : '';
+    return `[Engram · mensagem de ${r.nome} (${r.papel}, ${r.modelo})]\n${texto}${doSetor}\n\n(${dica})`;
   }
 
   enfileirar(j, de, texto, formatado = null) {

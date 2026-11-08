@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="codigo.css">
 <link rel="stylesheet" href="fluxos.css">
 <link rel="stylesheet" href="previa.css">
+<link rel="stylesheet" href="setores.css">
 </head>
 <body>
 <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -64,6 +65,7 @@
 <section class="vista" id="palco">
   <div class="grade" id="grade"></div>
   <div class="mundo" id="mundo">
+    <div id="setores"></div>
     <svg class="fios" id="fios" aria-hidden="true">
       <defs>
         <filter id="borrar" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter>
@@ -92,8 +94,9 @@
   </div>
 
   <div class="hud">
-    <span class="hud-dica" id="hud-dica">Arraste o fundo para mover · roda do mouse aproxima · ⤢ no cartão abre o leitor grande · duplo clique no topo foca</span>
+    <span class="hud-dica" id="hud-dica">Arraste o fundo para mover · roda do mouse aproxima · ⤢ no cartão abre o leitor grande · Shift + arrastar desenha um setor</span>
     <div class="hud-zoom">
+      <button class="btn-setor" id="btn-setor" title="Desenhar um setor (S) · ou Shift + arrastar no fundo · ou Ctrl + clique nos cartões"><span class="ico"></span>Setor<kbd>S</kbd></button>
       <button class="btn-icone" id="zoom-menos" title="Afastar">−</button>
       <button class="hud-pct" id="zoom-pct" title="Voltar para 100%">100%</button>
       <button class="btn-icone" id="zoom-mais" title="Aproximar">+</button>

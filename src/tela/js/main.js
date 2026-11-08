@@ -377,6 +377,9 @@ function tratar(m) {
     else palco.desligarLocal(m.a, m.b);
   } else if (m.tipo === "palco") {
     if (m.acao === "organizado") palco.reposicionar(m.posicoes);
+  } else if (m.tipo === "setor") {
+    if (m.acao === "salvo") palco.setores.receber(m.setor);
+    else if (m.acao === "removido") palco.setores.removerLocal(m.id);
   } else if (m.tipo === "mensagem") {
     palco.mensagem(m.de, m.para, m.fase);
     if (m.fase === "enviada") {
@@ -471,6 +474,7 @@ async function iniciar() {
     const noEditor = foco?.closest?.(".monaco-editor"); // o editor da vista Código tem os atalhos dele (Ctrl+K…)
     const digitando = foco?.matches?.("input, textarea, select") || noTerminal || noEditor || foco?.isContentEditable;
     if (app.vista === "codigo" && !document.querySelector("dialog[open]") && codigo.tecla(ev)) return;
+    if (app.vista === "palco" && ev.key === "Escape" && !digitando && palco.setores.escape()) { ev.preventDefault(); return; }
     if ((ev.ctrlKey && ev.key.toLowerCase() === "k" && !noTerminal && !noEditor) || (ev.key === "/" && !digitando)) {
       ev.preventDefault();
       $("#busca").focus();
@@ -481,6 +485,8 @@ async function iniciar() {
       gaveta.fechar();
     } else if (!digitando && !ev.ctrlKey && !ev.altKey && ["1", "2", "3", "4"].includes(ev.key)) {
       trocarVista({ 1: "palco", 2: "cerebro", 3: "codigo", 4: "fluxos" }[ev.key]);
+    } else if (!digitando && !ev.ctrlKey && !ev.altKey && !ev.metaKey && app.vista === "palco" && ev.key.toLowerCase() === "s" && !document.querySelector("dialog[open]")) {
+      palco.setores.alternarModo(); // S: desenhar um setor (de novo: sai do modo)
     }
   });
   window.addEventListener("resize", moverPilula);
