@@ -15,7 +15,7 @@ function image(file, alt, widths = dimensions[file] ? [] : [640, 960, 1520]) {
 }
 
 export const views = [
-  { id: "palco", icon: "network", label: "Palco", title: "Seu time, na mesma tela", text: "Conecte os cartões para que os agentes troquem tarefas e respostas.", ...image("palco-hero", "Palco do Engram com Maestro, Dev e Revisão conectados por linhas", [480, 768, 1120, 1520]) },
+  { id: "palco", icon: "network", label: "Palco", title: "Seu time, na mesma tela", text: "Conecte os cartões para que os agentes troquem tarefas e respostas.", ...image("palco-hero", "Palco do Engram com Maestro, Dev e Revisão conectados por linhas", [480, 768, 1200, 1520]) },
   { id: "cerebro", icon: "brain", label: "Cérebro", title: "Uma memória para o time", text: "Veja as notas ligadas em rede e acompanhe o que cada agente consultou.", ...image("cerebro", "Rede de notas de exemplo com conexões entre sistemas, chamados e agentes") },
   { id: "fluxos", icon: "flow", label: "Fluxos", title: "Acompanhe o caminho de uma tarefa", text: "Veja o projeto em blocos e identifique onde um agente está trabalhando.", ...image("fluxos", "Fluxo de publicação de exemplo, do portal até a fila de processamento") },
   { id: "codigo", icon: "code", label: "Código", title: "Do plano ao arquivo", text: "Abra arquivos, acompanhe mudanças no Git e revise o código no mesmo ambiente.", ...image("codigo", "Vista Código do Engram com a árvore do projeto de exemplo e um arquivo TypeScript aberto") },

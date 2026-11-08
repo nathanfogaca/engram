@@ -57,14 +57,20 @@ export function useHeroPointer(area, light) {
 export function useViewportMotion(page) {
   useEffect(() => {
     const reduced = matchMedia("(prefers-reduced-motion: reduce)");
-    const elements = page.current.querySelectorAll("[data-reveal], [data-pulse]");
+    const atmosphere = page.current.querySelector("[data-atmosphere]");
+    const elements = page.current.querySelectorAll("[data-reveal], [data-pulse], [data-atmosphere]");
     const waiting = new Set();
     let observer;
     let timer = 0;
     let lastScroll = -Infinity;
+    let atmosphereVisible = false;
 
     function noteScroll() {
       lastScroll = performance.now();
+      if (!atmosphere?.hasAttribute("data-drifting")) return;
+      atmosphere.removeAttribute("data-drifting");
+      waiting.add(atmosphere);
+      if (!timer) startVisibleMotion();
     }
 
     function startVisibleMotion() {
@@ -75,7 +81,9 @@ export function useViewportMotion(page) {
       }
       timer = 0;
       for (const target of waiting) {
-        if (target.hasAttribute("data-pulse")) {
+        if (target === atmosphere) {
+          target.toggleAttribute("data-drifting", !document.hidden);
+        } else if (target.hasAttribute("data-pulse")) {
           target.dataset.beating = "";
         } else {
           target.dataset.revealed = "";
@@ -85,11 +93,24 @@ export function useViewportMotion(page) {
       waiting.clear();
     }
 
+    function syncAtmosphere() {
+      if (!atmosphere) return;
+      if (document.hidden) {
+        atmosphere.removeAttribute("data-drifting");
+        waiting.delete(atmosphere);
+      } else if (atmosphereVisible && !reduced.matches) {
+        waiting.add(atmosphere);
+        if (!timer) startVisibleMotion();
+      }
+    }
+
     function update() {
       observer?.disconnect();
       clearTimeout(timer);
       timer = 0;
       waiting.clear();
+      atmosphereVisible = false;
+      atmosphere?.removeAttribute("data-drifting");
       if (reduced.matches) {
         elements.forEach(element => { delete element.dataset.beating; });
         return;
@@ -97,11 +118,13 @@ export function useViewportMotion(page) {
       observer = new IntersectionObserver(entries => {
         if (reduced.matches) return;
         for (const { target, isIntersecting } of entries) {
+          if (target === atmosphere) atmosphereVisible = isIntersecting;
           if (isIntersecting) {
             waiting.add(target);
           } else {
             waiting.delete(target);
             delete target.dataset.beating;
+            if (target === atmosphere) target.removeAttribute("data-drifting");
           }
         }
         if (!timer && waiting.size) startVisibleMotion();
@@ -113,11 +136,13 @@ export function useViewportMotion(page) {
 
     update();
     window.addEventListener("scroll", noteScroll, { passive: true });
+    document.addEventListener("visibilitychange", syncAtmosphere);
     reduced.addEventListener("change", update);
     return () => {
       clearTimeout(timer);
       observer?.disconnect();
       window.removeEventListener("scroll", noteScroll);
+      document.removeEventListener("visibilitychange", syncAtmosphere);
       reduced.removeEventListener("change", update);
     };
   }, [page]);

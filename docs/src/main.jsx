@@ -13,6 +13,7 @@ const integrations = [
 ];
 const iconPaths = {
   arrow: "M5 12h14m-6-6 6 6-6 6",
+  down: "M12 4v15m-5-5 5 5 5-5",
   external: "M7 17 17 7M7 7h10v10",
   download: "M12 3v12m-4-4 4 4 4-4M5 20h14",
   expand: "M8 4H4v4m12-4h4v4m0 8v4h-4M4 16v4h4",
@@ -34,55 +35,86 @@ function Icon({ name, size = 18 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={iconPaths[name]} /></svg>;
 }
 
-function Brand() {
+function Brand({ top = false }) {
   return <a href="#inicio" className="brand" aria-label="Engram, início">
-    <img src="img/engram.png" alt="" width="32" height="32" />Engram<span className="brand-dot" aria-hidden="true">.</span>
+    {top ? <svg className="brand-mark" width="34" height="34" viewBox="0 0 40 40" aria-hidden="true">
+      <defs><linearGradient id="header-mark"><stop stopColor="#8b7bff" /><stop offset=".5" stopColor="#38d6f5" /><stop offset="1" stopColor="#e879f9" /></linearGradient></defs>
+      <path d="M20 7 32 26H8Z" fill="none" stroke="url(#header-mark)" strokeWidth="1.8" />
+      <circle cx="20" cy="7" r="3.4" fill="#8b7bff" /><circle cx="32" cy="26" r="3.4" fill="#38d6f5" />
+      <circle cx="8" cy="26" r="3.4" fill="#e879f9" /><circle cx="20" cy="20" r="2.4" fill="#fff" />
+    </svg> : <img src="img/engram.png" alt="" width="32" height="32" />}
+    <span>Engram</span>
   </a>;
 }
 
-function Header() {
+function Header({ selectView }) {
   const mobileMenu = useRef(null);
-  const links = [["#produto", "Produto"], ["#recursos", "Recursos"], ["#temas", "Temas"], ["#perguntas", "FAQ"]];
+  const links = [["#produto", "Palco", 0], ["#produto", "Cérebro", 1], ["#recursos", "Recursos"], ["#temas", "Temas"], ["#perguntas", "Perguntas"]];
+  function follow(view) {
+    if (view !== undefined) selectView(view);
+    mobileMenu.current.open = false;
+  }
   return <header className="topbar">
-    <div className="wrap topbar-inner">
-      <Brand />
+    <div className="topbar-inner">
+      <Brand top />
       <nav className="top-nav" aria-label="Navegação principal">
-        {links.map(([href, label]) => <a key={href} href={href}>{label}</a>)}
+        {links.map(([href, label, view]) => <a key={label} href={href} onClick={() => follow(view)}>{label}</a>)}
       </nav>
       <div className="top-actions">
-        <a className="repo-link" href={github} target="_blank" rel="noopener">GitHub <Icon name="external" size={14} /></a>
         <details className="mobile-menu" ref={mobileMenu}>
           <summary aria-label="Menu"><Icon name="menu" /></summary>
           <nav aria-label="Navegação móvel">
-            {links.map(([href, label]) => <a key={href} href={href} onClick={() => { mobileMenu.current.open = false; }}>{label}</a>)}
+            {links.map(([href, label, view]) => <a key={label} href={href} onClick={() => follow(view)}>{label}</a>)}
           </nav>
         </details>
-        <a className="button button-small" href="#baixar"><Icon name="download" size={15} /> Baixar</a>
+        <a className="repo-link" href={github} target="_blank" rel="noopener">GitHub <Icon name="external" size={14} /></a>
+        <a className="button button-primary button-small" href="#baixar"><Icon name="download" size={16} /> Baixar</a>
       </div>
     </div>
   </header>;
 }
 
-function starPosition(seed) {
-  const fraction = Math.sin(seed) * 10000;
-  return fraction - Math.floor(fraction);
-}
+const skyColors = ["#8b7bff", "#38d6f5", "#e879f9", "#4ade9f", "#6aa8ff"];
+const skyShapes = [
+  [[20, 43], [68, 27], [112, 60]],
+  [[21, 70], [57, 27]],
+  [[18, 49], [61, 55], [117, 32]],
+  [[23, 86], [64, 35], [106, 71], [112, 32]],
+  [[42, 45]],
+  [[20, 32], [67, 53], [111, 47]],
+];
+const skyGroups = [[1,18,4],[5,36,1],[20,25,2],[27,39,4],[49,10,0],[65,13,1],
+  [62,31,4],[91,8,1],[88,37,3],[77,55,3],[94,64,4],[84,74,0],[64,82,1],[43,74,4],
+  [29,65,0],[6,80,4],[34,52,4],[72,91,2]];
 
-const stars = Array.from({ length: 39 }, (_, i) => ({
-  x: 1440 * starPosition(i * 73 + 11),
-  y: 760 * starPosition(i * 101 + 37),
-  r: i % 7 === 0 ? 1.7 : .9,
-}));
-const connections = stars.flatMap((star, index) => stars.slice(index + 1)
-  .filter(next => Math.hypot(star.x - next.x, star.y - next.y) < 132)
-  .map(next => `M${star.x.toFixed(1)},${star.y.toFixed(1)}L${next.x.toFixed(1)},${next.y.toFixed(1)}`)).join(" ");
-
-function SignalField() {
-  return <svg className="signal-field" viewBox="0 0 1440 760" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-    <path d={connections} fill="none" stroke="#8b7bff" strokeOpacity=".25" />
-    {stars.map(({ x, y, r }) => <circle key={x} cx={x} cy={y} r={r} fill="#b9beff" fillOpacity=".54" />)}
-  </svg>;
-}
+const SignalField = memo(function SignalField() {
+  return <div className="signal-field" data-atmosphere="" aria-hidden="true">
+    {skyGroups.map(([left, top, shape], index) => {
+      const dots = skyShapes[shape];
+      const [start, end] = dots;
+      return <div className="signal-group" key={left} style={{
+        left: `${left}%`, top: `${top}%`, "--drift": `${index % 2 ? 15 : -17}px`,
+        "--pace": `${10 + (index % 5) * 2}s`, "--phase": `-${index * 1.2}s`,
+      }}>
+        <svg viewBox="0 0 128 108" width="128" height="108">
+          {end && <path d={`M${dots.map(dot => dot.join(" ")).join("L")}`} fill="none" stroke="#8b7bff" strokeOpacity=".22" />}
+          {dots.map(([x, y], dot) => {
+            const color = skyColors[(index + dot * 2) % skyColors.length];
+            return <g key={x} fill={color}>
+              <circle cx={x} cy={y} r="8" opacity=".08" />
+              <circle cx={x} cy={y} r="4.5" opacity=".18" />
+              <circle cx={x} cy={y} r={dot % 2 ? 1.6 : 2.6} />
+            </g>;
+          })}
+        </svg>
+        {end && index % 3 === 2 && <i className="signal-spark" style={{
+          "--from-x": `${start[0]}px`, "--from-y": `${start[1]}px`,
+          "--to-x": `${end[0]}px`, "--to-y": `${end[1]}px`,
+        }} />}
+      </div>;
+    })}
+  </div>;
+});
 
 function Screen({ item, open, eager = false, fit = "fill", sizes }) {
   return <button className={`screen screen-${fit}`} type="button" onClick={() => open(item)} aria-label={`Ampliar. ${item.alt}`}>
@@ -91,17 +123,16 @@ function Screen({ item, open, eager = false, fit = "fill", sizes }) {
   </button>;
 }
 
-function ProductConsole({ open }) {
-  const [selected, setSelected] = useState(0);
+function ProductConsole({ open, selected, selectView }) {
   const item = views[selected];
   return <div className="console" id="produto" aria-label="Explore o Engram">
     <div className="console-top">
-      <span className="console-id"><span className="status-dot" data-pulse="" />Engram</span>
-      <span className="mono console-tag">Modo demonstração</span>
+      <span className="console-id"><img src="img/engram.png" width="18" height="18" alt="" />Engram</span>
+      <span className="console-tag"><i className="status-dot" aria-hidden="true" /> Prévia interativa</span>
     </div>
-    <div id="product-screen"><Screen item={item} open={open} eager={selected === 0} sizes="(max-width: 800px) calc(100vw - 32px), (max-width: 1080px) 55vw, (max-width: 1316px) 58vw, 740px" /></div>
+    <div id="product-screen"><Screen item={item} open={open} eager={selected === 0} sizes="(max-width: 1160px) calc(100vw - 40px), 1120px" /></div>
     <div className="console-controls" role="group" aria-label="Vistas do Engram">
-      {views.map(({ label, icon, id }, index) => <button key={id} type="button" aria-pressed={selected === index} aria-controls="product-screen" onClick={() => setSelected(index)}><Icon name={icon} size={16} /> {label}</button>)}
+      {views.map(({ label, icon, id }, index) => <button key={id} type="button" aria-pressed={selected === index} aria-controls="product-screen" onClick={() => selectView(index)}><Icon name={icon} size={16} /> {label}</button>)}
     </div>
     <div className="console-caption" aria-live="polite">
       <strong>{item.title}</strong><span>{item.text}</span>
@@ -109,7 +140,7 @@ function ProductConsole({ open }) {
   </div>;
 }
 
-function Hero({ open }) {
+function Hero({ open, selected, selectView }) {
   const copy = useRef(null);
   const light = useRef(null);
   useHeroPointer(copy, light);
@@ -118,16 +149,15 @@ function Hero({ open }) {
     <div className="wrap hero-layout">
       <div className="hero-copy" ref={copy}>
         <div className="pointer-light" ref={light} aria-hidden="true" />
-        <p className="kicker hero-kicker"><span className="status-dot" data-pulse="" /> Orquestração visual de agentes</p>
-        <h1 id="headline"><span>Seu time de IA,</span><br /><span className="hero-accent">em sintonia.</span></h1>
-        <p className="hero-lead">Conecte Claude Code e Codex em um palco visual. Divida tarefas, compartilhe memória e veja o trabalho avançar no seu computador.</p>
+        <h1 id="headline">Vários agentes.<br /><span className="hero-accent">Um só time.</span></h1>
+        <p className="hero-lead">Conecte Claude Code, Codex e outros agentes em um palco visual. Divida tarefas, acompanhe o trabalho e compartilhe o que aprendem, tudo no seu computador.</p>
         <div className="button-row">
           <a className="button button-primary" href={download}><Icon name="download" /> Baixar para Windows</a>
-          <a className="button button-quiet" href="#como-funciona">Como funciona <Icon name="arrow" size={17} /></a>
+          <a className="button button-quiet" href="#como-funciona"><Icon name="down" size={17} /> Ver como funciona</a>
         </div>
-        <p className="hero-meta mono">Windows 10 e 11 · 64 bits · Código aberto</p>
+        <p className="hero-meta">Windows 10 e 11 <span aria-hidden="true">·</span> Grátis e de código aberto</p>
       </div>
-      <ProductConsole open={open} />
+      <ProductConsole open={open} selected={selected} selectView={selectView} />
     </div>
     <div className="wrap provider-strip">
       <span className="mono">Integrações</span>
@@ -260,13 +290,14 @@ function Lightbox({ image, close }) {
 }
 
 const LandingContent = memo(function LandingContent({ open }) {
+  const [selected, selectView] = useState(0);
   const page = useRef(null);
   useViewportMotion(page);
   return <>
     <a href="#inicio" className="skip-link">Ir para o conteúdo</a>
-    <Header />
+    <Header selectView={selectView} />
     <main id="inicio" ref={page}>
-      <Hero open={open} />
+      <Hero open={open} selected={selected} selectView={selectView} />
       <Workflow />
       <Toolbox open={open} />
       <ThemeLab open={open} />
