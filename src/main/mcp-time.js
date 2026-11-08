@@ -43,6 +43,8 @@ function ferramentas(janelas) {
         modo: { type: 'string', enum: ['time', 'lista'] },
         posicoes: { type: 'array', items: { type: 'object', properties: { nome: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['nome', 'x', 'y'] }, description: 'só no modo lista' },
       }, ['modo']) },
+    { name: 'renomear', description: 'Só para o maestro, quando a pessoa pedir. Muda o nome de uma janela aberta (pode ser você). O nome é único entre as janelas abertas; a conversa da janela continua a mesma.',
+      inputSchema: objeto({ quem: { type: 'string', description: 'nome atual, como aparece em equipe' }, nome: { type: 'string', description: 'nome novo, até 40 letras' } }, ['quem', 'nome']) },
     { name: 'criar_setor', description: 'Só para o maestro, quando a pessoa pedir. Cria um setor no palco (uma área com nome, cor e instrução, como a pessoa desenha com o botão Setor) em volta dos agentes dados. Quem está dentro recebe a instrução do setor junto com cada tarefa, e o organizar_palco não tira ninguém de dentro. Se o retângulo em volta deles pegaria outro agente ou encostaria noutro setor, o Engram junta os cartões num lugar livre.',
       inputSchema: objeto({
         nome: { type: 'string', description: 'até 24 letras, ex.: Time NBS' },
@@ -91,6 +93,7 @@ async function tratar(janelas, sessao, m) {
         case 'ligar': return ok(texto(janelas.ligarJanelas(sessao, String(a.a ?? ''), String(a.b ?? ''))));
         case 'desligar': return ok(texto(janelas.desligarJanelas(sessao, String(a.a ?? ''), String(a.b ?? ''), a.confirmar_revisao === true)));
         case 'organizar_palco': return ok(texto(janelas.organizarPalco(sessao, String(a.modo || ''), a.posicoes)));
+        case 'renomear': return ok(texto(janelas.renomearPeloMaestro(sessao, String(a.quem ?? ''), String(a.nome ?? ''))));
         case 'criar_setor': return ok(texto(janelas.criarSetor(sessao, a)));
         case 'editar_setor': return ok(texto(janelas.editarSetor(sessao, a)));
         case 'remover_setor': return ok(texto(janelas.removerSetor(sessao, a)));

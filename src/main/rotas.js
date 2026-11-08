@@ -114,6 +114,9 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
     try { janelas.fechar(p.id); } catch (e) { throw new ErroRota(404, e.message); }
     return { ok: true };
   });
+  rota('PUT', '/api/sessoes/:id/nome', (p, b) => {
+    try { return janelas.renomear(p.id, b.nome); } catch (e) { throw new ErroRota(400, e.message); }
+  });
   rota('GET', '/api/sessoes/:id/eventos', p => cerebro.eventos(p.id));
   rota('GET', '/api/sessoes/:id/conversa', (p, b, q) => {
     return janelas.lerConversa(p.id, Number(q.get('desde')) || 0, Number(q.get('ultimos')) || null);

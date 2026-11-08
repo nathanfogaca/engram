@@ -316,12 +316,18 @@ export class Palco {
     this.setores.atualizarMembros(false);
 
     cab.addEventListener("pointerdown", e => {
-      if (e.button !== 0 || e.target.closest("button")) return;
+      if (e.button !== 0 || e.target.closest("button, input")) return;
       e.stopPropagation();
       if (e.ctrlKey || e.metaKey) { this.setores.alternarSelecao(c); return; } // Ctrl + clique: seleciona para agrupar num setor
       this.gesto = { tipo: "mover", c, x: e.clientX, y: e.clientY, cx: c.x, cy: c.y };
     });
-    cab.addEventListener("dblclick", e => { if (!e.target.closest("button")) this.focar(c.id); });
+    // duplo clique no nome renomeia; no resto do topo, foca o cartão
+    cab.addEventListener("dblclick", e => {
+      if (e.target.closest("button, input")) return;
+      if (e.target.closest(".cab-nome")) this.renomear(c);
+      else this.focar(c.id);
+    });
+    c.elNome.title = `${info.nome} · duplo clique para renomear`;
     c.btnConversa.onclick = () => this.modo(c, "conversa");
     c.btnTerminal.onclick = () => this.modo(c, "terminal");
     btnLer.onclick = () => this.aoLer?.(c.id);
@@ -383,6 +389,12 @@ export class Palco {
   atualizar(info) {
     const c = this.cartoes.get(info.id);
     if (!c) return;
+    if (info.nome && info.nome !== c.info.nome && !c.editandoNome) {
+      c.elNome.textContent = info.nome;
+      c.elNome.title = `${info.nome} · duplo clique para renomear`;
+      if (c.conv) c.conv.nome = info.nome;
+      this.flash(c, c.cor);
+    }
     c.info = info;
     if (info.aberta && !c.viva) this.reviver(c);
     else if (!info.aberta && c.viva) this.marcarEncerrada(c.id);
@@ -390,6 +402,43 @@ export class Palco {
 
   posicionar(c) {
     Object.assign(c.el.style, { left: `${c.x}px`, top: `${c.y}px`, width: `${c.w}px`, height: `${c.h}px` });
+  }
+
+  /** Edita o nome no próprio cartão: Enter (ou clicar fora) salva, Esc desiste. */
+  renomear(c) {
+    if (c.editandoNome) return;
+    c.editandoNome = true;
+    const antes = c.info.nome;
+    const campo = el("input", { class: "cab-nome-campo", value: antes, maxlength: "40", spellcheck: "false", "aria-label": "Nome da janela" });
+    c.elNome.replaceChildren(campo);
+    campo.focus();
+    campo.select();
+    let feito = false;
+    const fim = async salvar => {
+      if (feito) return;
+      feito = true;
+      const nome = campo.value.trim();
+      c.editandoNome = false;
+      c.elNome.textContent = antes;
+      if (!salvar || !nome || nome === antes) return;
+      c.elNome.textContent = nome;
+      try {
+        const r = await api(`/api/sessoes/${c.id}/nome`, { method: "PUT", json: { nome } });
+        c.info = { ...c.info, nome: r.nome };
+        c.elNome.textContent = r.nome;
+        c.elNome.title = `${r.nome} · duplo clique para renomear`;
+        if (c.conv) c.conv.nome = r.nome;
+      } catch (e) {
+        c.elNome.textContent = antes;
+        avisar({ texto: e.message, cor: "#ff6b7d" });
+      }
+    };
+    campo.addEventListener("keydown", e => {
+      e.stopPropagation(); // as teclas são do campo, não dos atalhos do palco
+      if (e.key === "Enter") { e.preventDefault(); fim(true); }
+      else if (e.key === "Escape") { e.preventDefault(); fim(false); }
+    });
+    campo.addEventListener("blur", () => fim(true));
   }
 
   trazerFrente(c) {

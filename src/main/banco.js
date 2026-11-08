@@ -47,6 +47,7 @@ function abrir(caminho) {
   const colunas = new Set(db.prepare("PRAGMA table_info('sessoes')").all().map(c => c.name));
   if (!colunas.has('externo')) db.exec('ALTER TABLE sessoes ADD COLUMN externo TEXT'); // id da conversa no CLI (Codex)
   if (!colunas.has('mcps')) db.exec('ALTER TABLE sessoes ADD COLUMN mcps TEXT'); // MCPs escolhidos para a janela (JSON); NULL = os ativos
+  if (!colunas.has('nome_prompt')) db.exec('ALTER TABLE sessoes ADD COLUMN nome_prompt TEXT'); // o nome com que a conversa começou (está no prompt dela)
   const ligacoes = new Set(db.prepare("PRAGMA table_info('conexoes')").all().map(c => c.name));
   if (!ligacoes.has('revisa')) db.exec('ALTER TABLE conexoes ADD COLUMN revisa TEXT'); // a ponta que revisa as entregas da outra
   return db;

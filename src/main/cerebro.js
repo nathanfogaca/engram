@@ -180,6 +180,8 @@ class Cerebro {
   sessaoExterno(id, externo) { this.q('UPDATE sessoes SET externo = ? WHERE id = ? AND externo IS NOT ?').run(externo, id, externo); }
   sessaoEstado(id, estado) { this.q('UPDATE sessoes SET estado = ? WHERE id = ?').run(estado, id); }
   sessaoReabrir(id, estado) { this.q('UPDATE sessoes SET encerrada = NULL, manter = 1, estado = ? WHERE id = ?').run(estado, id); }
+  sessaoRenomear(id, nome) { this.q('UPDATE sessoes SET nome = ? WHERE id = ?').run(nome, id); }
+  sessaoNomePrompt(id, nome) { this.q('UPDATE sessoes SET nome_prompt = ? WHERE id = ?').run(nome, id); }
   sessaoManter(id, manter) { this.q('UPDATE sessoes SET manter = ? WHERE id = ?').run(manter ? 1 : 0, id); }
   sessaoEncerrar(id, manter = false) {
     this.q("UPDATE sessoes SET encerrada = COALESCE(encerrada, ?), estado = 'encerrada', manter = ? WHERE id = ?").run(agora(), manter ? 1 : 0, id);

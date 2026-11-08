@@ -308,6 +308,12 @@ mark { background: rgb(var(--acento1) / .3); color: var(--texto-forte); border-r
 .cartao.atencao .orbe { background: var(--ambar); box-shadow: 0 0 10px var(--ambar), 0 0 24px var(--ambar); animation: pulsar .7s ease-in-out infinite; }
 @keyframes pulsar { 50% { transform: scale(1.6); box-shadow: 0 0 14px var(--cor), 0 0 40px var(--cor); } }
 .cab-nome { font-weight: 680; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+.cab-nome:has(.cab-nome-campo) { overflow: visible; }
+.cab-nome-campo {
+  width: 170px; font: inherit; font-weight: 680; color: var(--texto-forte); padding: 2px 7px; margin: -3px 0; border-radius: 8px; outline: none;
+  border: 1px solid color-mix(in srgb, var(--cor) 70%, transparent); background: rgb(var(--poco) / .4);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cor) 22%, transparent), 0 0 18px color-mix(in srgb, var(--cor) 35%, transparent);
+}
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: rgb(var(--tinta) / .06); color: var(--discreto); }
 .tag.maestro {
   color: #ffe9b0; background: linear-gradient(90deg, rgba(245, 196, 81, .28), rgb(var(--acento3) / .24));

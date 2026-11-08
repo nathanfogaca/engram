@@ -17,7 +17,7 @@ const EVENTOS_GANCHO = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostT
 const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando', PreToolUse: 'trabalhando', PostToolUse: 'pensando', Stop: 'esperando você', Notification: 'precisa de você' };
 const LIVRE = new Set(['pronta', 'esperando você']);
 const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
-const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
+const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
 // as cores dos setores, as mesmas da tela (src/tela/js/setores.js)
 const CORES_SETOR = { violeta: '#8b7bff', ciano: '#38d6f5', magenta: '#e879f9', ambar: '#ffc857', verde: '#4ade9f', coral: '#ff7a6b' };
 const PESSOA = 'pessoa'; // remetente das mensagens que a pessoa digita na vista Conversa
@@ -245,6 +245,8 @@ class Janelas {
     j.arquivosAssinatura = this.arquivos.assinatura(id);
     this.ativas.set(id, j);
     this.cerebro.sessaoCriar(id, nome, provedor, modelo, papel, cwd);
+    // conversa nova: o nome dela é o deste prompt; retomada: continua o nome com que ela começou
+    if (!continuar || !anterior?.nome_prompt) this.cerebro.sessaoNomePrompt(id, nome);
     if (mcps !== undefined) this.cerebro.sessaoMcps(id, escolhidos);
     if (posicao) this.cerebro.posicaoSalvar(id, ...posicaoValida(posicao));
     else if (!this.cerebro.posicao(id)) this.cerebro.posicaoSalvar(id, ...this.lugarLivre(ligarA));
@@ -791,6 +793,45 @@ class Janelas {
     return `Organizei o palco: ${movidos === 1 ? '1 colega' : `${movidos} colegas`} em volta de você, agrupados por papel.${emSetor ? ` ${emSetor === 1 ? 'O colega que está num setor ficou' : `Os ${emSetor} que estão em setores ficaram`} onde a pessoa deixou.` : ''}`;
   }
 
+  /**
+   * Muda o nome de uma janela (pela tela ou pelo maestro). O nome é como os agentes se chamam no enviar,
+   * então tem de ser único entre as janelas abertas. A conversa continua a mesma.
+   */
+  renomear(id, nome) {
+    const s = this.cerebro.sessao(id);
+    if (!s) throw new Error('janela não encontrada');
+    nome = String(nome ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/"/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!nome) throw new Error('o nome não pode ficar vazio');
+    const outra = [...this.ativas.keys()].find(x => x !== id && this.cerebro.sessao(x)?.nome.toLowerCase() === nome.toLowerCase());
+    if (outra) throw new Error(`já há uma janela aberta chamada ${this.nomeDe(outra)}`);
+    const antes = s.nome;
+    if (antes !== nome) {
+      this.cerebro.sessaoRenomear(id, nome);
+      this.avisar({ tipo: 'sessao', sessao: this.info(id) });
+    }
+    return { antes, nome };
+  }
+
+  /** O prompt da conversa tem o nome com que ela começou: se a janela foi renomeada, o agente fica sabendo. */
+  avisoDeNome(id) {
+    const s = this.cerebro.sessao(id);
+    if (!s?.nome_prompt || s.nome === s.nome_prompt) return '';
+    return `\n\n(No Engram você agora se chama ${s.nome}, não mais ${s.nome_prompt}: é por esse nome que os colegas falam com você.)`;
+  }
+
+  renomearPeloMaestro(de, quem, nome) {
+    if (!this.ehMaestro(de)) return 'Só o maestro renomeia janelas. Peça à pessoa (duplo clique no nome do cartão).';
+    const id = this.achar(quem);
+    if (!id) return `Não há janela aberta chamada "${quem}". Veja os nomes com equipe.`;
+    try {
+      const r = this.renomear(id, nome);
+      if (r.antes === r.nome) return `${r.nome} já tem esse nome.`;
+      return `Renomeei ${r.antes} para ${r.nome}. Use o nome novo no enviar; a conversa dele continua a mesma.`;
+    } catch (e) {
+      return `Não renomeei: ${e.message}.`;
+    }
+  }
+
   // ---------------------------------------------------------------- setores pelo maestro
 
   /** Os nomes viram ids de janelas abertas; devolve { ids } ou { erro }. */
@@ -923,7 +964,7 @@ class Janelas {
   enfileirar(j, de, texto, formatado = null) {
     const n = this.cerebro.mensagemRegistrar(de, j.id, texto);
     const naFrente = j.caixa.length + (j.entregando || !LIVRE.has(j.estado) ? 1 : 0);
-    j.caixa.push([n, de, formatado || this.formatar(de, texto, j.id)]);
+    j.caixa.push([n, de, (formatado || this.formatar(de, texto, j.id)) + this.avisoDeNome(j.id)]);
     this.avisar({ tipo: 'mensagem', fase: 'enviada', de, para: j.id, texto: texto.slice(0, 240), n });
     this.tentarEntregar(j);
     return naFrente;
