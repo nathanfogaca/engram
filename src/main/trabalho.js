@@ -4,10 +4,19 @@
 // Agentes sem ganchos (Codex, Gemini...) são acompanhados por um vigia na pasta deles.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 
 const EDITORES = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+// ferramentas que não gravam no disco: enquanto rodam, o que muda na pasta não é do agente
+const SO_LEITURA = new Set(['Read', 'NotebookRead', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch', 'TodoWrite', 'ToolSearch', 'Task']);
+// o vigia não olha pastas de sistema nem arquivos que mudam sozinhos (logs, bancos, temporários)
+const PASTAS_FORA = new Set(['node_modules', '__pycache__', 'AppData', 'venv', 'site-packages']);
+const ARQUIVOS_FORA = /\.(log|tmp|temp|lock|pid|pyc|swp|etl|db|db-wal|db-shm|db-journal|sqlite|sqlite-wal|sqlite-shm)$/i;
+const OCUPADO = new Set(['pensando', 'trabalhando']);
+const FOLGA_MS = 3000; // depois de um comando terminar, o disco ainda pode estar gravando
+const ACAO_MAX_MS = 10 * 60_000; // comando sem fim (falhou sem PostToolUse) deixa de valer
 const LIMITE = 2 * 1024 * 1024;
 
 function lerTexto(arquivo) {
@@ -40,22 +49,37 @@ class Trabalho {
   pastaDe(sessao) { return this.janelas.cerebro.sessao(sessao)?.pasta || this.janelas.cfg.pasta_trabalho; }
 
   rel(sessao, arquivo) {
-    const r = path.relative(this.pastaDe(sessao), arquivo);
-    return r && !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : arquivo;
+    const pasta = this.pastaDe(sessao);
+    let real = pasta;
+    try { real = fs.realpathSync.native(pasta); } catch { /* fica a gravada */ }
+    for (const base of new Set([pasta, real])) {
+      const r = path.relative(base, arquivo);
+      if (r && !r.startsWith('..') && !path.isAbsolute(r)) return r.split(path.sep).join('/');
+    }
+    return arquivo;
   }
 
   /** Começa a acompanhar uma sessão (uma janela de trabalho abriu). */
   assistir(sessao) {
     let a = this.assistindo.get(sessao);
     if (a) { a.janelas++; return this.info(sessao); }
-    a = { janelas: 1, antes: new Map(), recentes: new Map(), vistos: new Map(), datas: new Map(), desde: Date.now(), vigia: null, timers: new Map() };
+    const s = this.janelas.cerebro.sessao(sessao);
+    a = {
+      janelas: 1, antes: new Map(), recentes: new Map(), vistos: new Map(), datas: new Map(), desde: Date.now(), vigia: null, timers: new Map(),
+      ganchos: (s?.provedor || 'claude') === 'claude', acoes: 0, ultimaAcao: 0, fimAcao: 0,
+    };
     this.assistindo.set(sessao, a);
-    const pasta = this.pastaDe(sessao);
-    try {
+    // o nome completo da pasta: com nome curto do Windows (NATHAN~1.FOG) o fs.watch derruba o processo inteiro
+    let pasta = this.pastaDe(sessao);
+    try { pasta = fs.realpathSync.native(pasta); } catch { pasta = null; }
+    // a pasta do usuário ou a raiz do disco têm programas gravando o tempo todo: não dá para vigiar
+    const igual = p => path.resolve(p).toLowerCase() === path.resolve(pasta).toLowerCase();
+    if (pasta && !igual(os.homedir()) && !igual(path.parse(pasta).root)) try {
       a.vigia = fs.watch(pasta, { recursive: true }, (_t, nome) => {
         if (!nome) return;
         const partes = String(nome).split(/[\\/]/);
-        if (partes.some(p => p.startsWith('.') || p === 'node_modules' || p === '__pycache__')) return;
+        if (partes.some(p => p.startsWith('.') || PASTAS_FORA.has(p)) || ARQUIVOS_FORA.test(String(nome))) return;
+        if (!this.agindo(sessao, a)) return; // agente parado: quem mexeu foi outro programa
         const arquivo = path.join(pasta, String(nome));
         clearTimeout(a.timers.get(arquivo));
         a.timers.set(arquivo, setTimeout(() => this.mudouNoDisco(sessao, arquivo), 400));
@@ -81,10 +105,25 @@ class Trabalho {
     return { id: s.id, nome: s.nome, provedor: s.provedor, modelo: s.modelo, papel: s.papel, pasta: this.pastaDe(sessao), estado: j ? j.estado : 'encerrada', viva: !!j, ganchos: (s.provedor || 'claude') === 'claude' };
   }
 
+  /** O agente está fazendo algo que pode gravar no disco? Só então o vigia conta o que mudou na pasta. */
+  agindo(sessao, a) {
+    const j = this.janelas.ativas.get(sessao);
+    if (!j) return false;
+    if (!a.ganchos) return OCUPADO.has(j.estado); // sem ganchos: vale o estado lido da tela
+    // com ganchos as edições já chegam pelo gancho; o vigia só pega o que um comando (Bash, MCP...) gravar
+    const agora = Date.now();
+    return (a.acoes > 0 && agora - a.ultimaAcao < ACAO_MAX_MS) || agora - a.fimAcao < FOLGA_MS;
+  }
+
   /** Os ganchos (Claude Code): antes e depois de cada edição, lidos do disco pelo Engram. */
   evento(sessao, evento, ferramenta, entrada) {
     const a = this.assistindo.get(sessao);
-    if (!a || !EDITORES.has(ferramenta)) return;
+    if (!a) return;
+    const comando = ferramenta && !EDITORES.has(ferramenta) && !SO_LEITURA.has(ferramenta);
+    if (evento === 'PreToolUse' && comando) { a.acoes++; a.ultimaAcao = Date.now(); }
+    else if (evento === 'PostToolUse' && comando && a.acoes > 0) { if (--a.acoes === 0) a.fimAcao = Date.now(); }
+    else if (['Stop', 'UserPromptSubmit', 'SessionStart', 'SessionEnd'].includes(evento)) { if (a.acoes) a.fimAcao = Date.now(); a.acoes = 0; }
+    if (!EDITORES.has(ferramenta) || !entrada) return;
     const arquivo = entrada.file_path || entrada.notebook_path || entrada.path;
     if (!arquivo) return;
     const abs = path.resolve(this.pastaDe(sessao), String(arquivo));
