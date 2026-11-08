@@ -48,7 +48,7 @@ class Trabalho {
   assistir(sessao) {
     let a = this.assistindo.get(sessao);
     if (a) { a.janelas++; return this.info(sessao); }
-    a = { janelas: 1, antes: new Map(), recentes: new Map(), vistos: new Map(), vigia: null, timers: new Map() };
+    a = { janelas: 1, antes: new Map(), recentes: new Map(), vistos: new Map(), datas: new Map(), desde: Date.now(), vigia: null, timers: new Map() };
     this.assistindo.set(sessao, a);
     const pasta = this.pastaDe(sessao);
     try {
@@ -103,6 +103,7 @@ class Trabalho {
         a.antes.delete(abs);
         a.recentes.set(abs, Date.now());
         a.vistos.set(abs, depois);
+        try { a.datas.set(abs, fs.statSync(abs).mtimeMs); } catch { /* saiu do disco */ }
         if (antes === depois) return;
         this.avisar({ tipo: 'trabalho', sessao, fase: 'escreveu', arquivo: abs, rel: this.rel(sessao, abs), ferramenta, antes, depois });
       }, 120);
@@ -114,7 +115,16 @@ class Trabalho {
     const a = this.assistindo.get(sessao);
     if (!a) return;
     if (Date.now() - (a.recentes.get(arquivo) || 0) < 4000) return; // o gancho já contou essa
-    if (!fs.existsSync(arquivo) || fs.statSync(arquivo).isDirectory()) return;
+    let st;
+    try { st = fs.statSync(arquivo); } catch { return; }
+    if (st.isDirectory()) return;
+    // o Windows avisa também quando o arquivo só é lido (data de acesso): sem mudar a data de gravação, não é edição
+    const data = st.mtimeMs, dataVista = a.datas.get(arquivo);
+    a.datas.set(arquivo, data);
+    if (dataVista === data || (dataVista === undefined && data < a.desde)) {
+      if (!a.vistos.has(arquivo)) { const t = lerTexto(arquivo); if (t !== null) a.vistos.set(arquivo, t); }
+      return;
+    }
     const depois = lerTexto(arquivo);
     if (depois === null) return;
     let antes = a.vistos.get(arquivo);

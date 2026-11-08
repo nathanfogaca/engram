@@ -73,6 +73,26 @@ function corHex(cor) {
   return "#" + m.slice(0, 3).map(n => Math.round(+n).toString(16).padStart(2, "0")).join("");
 }
 
+/** Onde ficam os balões do editor (dica, sugestões, parâmetros). Fora dos painéis: o vidro deles
+ *  (backdrop-filter) vira a referência de "position: fixed" e os balões saíam deslocados e cortados. */
+function caixaDeBaloes() {
+  let c = document.getElementById("cod-baloes");
+  if (!c) {
+    c = el("div", { id: "cod-baloes", class: "monaco-editor", style: { position: "absolute", top: "0", left: "0", width: "0", height: "0", overflow: "visible", zIndex: "60" } });
+    document.body.append(c);
+  }
+  return c;
+}
+
+/** Quando o diff terminar de calcular, rola até a primeira mudança (como o VS Code). */
+export function irParaPrimeiraMudanca(diff) {
+  const ouvinte = diff.onDidUpdateDiff(() => {
+    ouvinte.dispose();
+    const c = diff.getLineChanges?.() || [];
+    if (c[0]) diff.getModifiedEditor().revealLineInCenter(Math.max(1, c[0].modifiedStartLineNumber));
+  });
+}
+
 /** As cores do editor pelo tema do Engram (quando não há tema do VS Code escolhido). */
 export function coresDoEngram() {
   const cs = getComputedStyle(document.documentElement);
@@ -210,7 +230,7 @@ export class VistaCodigo {
       fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace', fontSize: 13.5, fontLigatures: true, automaticLayout: true,
       minimap: { enabled: true, renderCharacters: false }, smoothScrolling: true, cursorSmoothCaretAnimation: "on", cursorBlinking: "smooth",
       renderWhitespace: "selection", bracketPairColorization: { enabled: true }, guides: { bracketPairs: "active", indentation: true },
-      stickyScroll: { enabled: true }, scrollBeyondLastLine: false, fixedOverflowWidgets: true, padding: { top: 10 }, tabSize: 2,
+      stickyScroll: { enabled: true }, scrollBeyondLastLine: false, fixedOverflowWidgets: true, overflowWidgetsDomNode: caixaDeBaloes(), padding: { top: 10 }, tabSize: 2,
     };
     this.editor = monaco.editor.create($("#cod-host-editor"), { ...opcoes, model: null });
     this.diff = monaco.editor.createDiffEditor($("#cod-host-diff"), { ...opcoes, readOnly: true, originalEditable: false, renderSideBySide: true, minimap: { enabled: false } });
@@ -520,6 +540,7 @@ export class VistaCodigo {
       a.desenhar(pg);
     } else if (a.tipo === "diff") {
       df.hidden = false;
+      if (!a.revelado) { a.revelado = true; irParaPrimeiraMudanca(this.diff); }
       this.diff.setModel({ original: a.original, modified: a.modificado });
       requestAnimationFrame(() => this.diff.layout());
     }

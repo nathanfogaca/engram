@@ -61,10 +61,16 @@ body.ocupado .trab-olho { animation: trab-respira 1.8s ease-in-out infinite; }
 .trab-vazio-olho .codicon { font-size: 36px !important; color: #fff; }
 
 /* a escrita no editor */
-.trab-linha-entra { background: rgb(74 222 159 / .13); box-shadow: inset 3px 0 0 #4ade9f; }
+.trab-linha-entra { background: rgb(74 222 159 / .13); }
 .trab-linha-entra.fim { animation: trab-esmaece 9s ease-out forwards; }
-@keyframes trab-esmaece { 0%, 40% { background: rgb(74 222 159 / .13); } 100% { background: transparent; box-shadow: inset 3px 0 0 rgb(74 222 159 / .2); } }
-.trab-linha-sai { background: rgb(255 107 125 / .22); box-shadow: inset 3px 0 0 #ff6b7d; text-decoration: line-through; }
+@keyframes trab-esmaece { 0%, 40% { background: rgb(74 222 159 / .13); } 100% { background: transparent; } }
+.trab-linha-sai { background: rgb(255 107 125 / .22); text-decoration: line-through; }
+/* a barra fica na margem, antes do texto: dentro da linha ela cobria a primeira letra */
+.trab-barra { width: 3px !important; margin-left: 4px; border-radius: 2px; }
+.trab-barra.entra { background: #4ade9f; }
+.trab-barra.entra.fim { animation: trab-barra-esmaece 9s ease-out forwards; }
+@keyframes trab-barra-esmaece { 0%, 40% { opacity: 1; } 100% { opacity: .25; } }
+.trab-barra.sai { background: #ff6b7d; }
 .trab-cursor::before { content: ""; display: inline-block; width: 2px; height: 1.15em; margin-right: -2px; vertical-align: text-bottom; background: var(--ciano); box-shadow: 0 0 8px var(--ciano), 0 0 16px var(--ciano); animation: trab-cursor .5s steps(1) infinite; }
 @keyframes trab-cursor { 50% { opacity: .2; } }
 

@@ -5,7 +5,7 @@
 // e o depois) e Terminal (o terminal dele, só para olhar).
 
 import { $, el, api, avisar, corModelo } from "./util.js";
-import { carregarMonaco, coresDoEngram, iconeDe } from "./codigo.js";
+import { carregarMonaco, coresDoEngram, iconeDe, irParaPrimeiraMudanca } from "./codigo.js";
 import { PainelExtensoes, definirTemaEditor, linguagemPelasExtensoes } from "./extensoes.js";
 
 const ic = (nome, extra = "") => el("i", { class: `codicon codicon-${nome} ${extra}`.trim() });
@@ -196,10 +196,12 @@ class JanelaTrabalho {
     const a = this.atual && this.arquivos.get(this.atual);
     if (!a || !this.diff) return;
     const monaco = window.monaco;
-    this.diffModelos?.forEach(m => m.dispose());
-    const lang = a.modelo.getLanguageId();
+    const lang = a.modelo.getLanguageId(), velhos = this.diffModelos;
     this.diffModelos = [monaco.editor.createModel(a.primeiro ?? "", lang), monaco.editor.createModel(a.ultimo, lang)];
+    irParaPrimeiraMudanca(this.diff);
     this.diff.setModel({ original: this.diffModelos[0], modified: this.diffModelos[1] });
+    velhos?.forEach(m => m.dispose()); // só depois de o diff largar os antigos
+
     $("#trab-vazio").hidden = true;
   }
 
@@ -242,6 +244,8 @@ class JanelaTrabalho {
     a.escrevendo = true;
     this.desenharArquivos();
     a.modelo.setValue(m.antes);
+    // setValue de um texto sem quebras volta ao padrão do sistema (CRLF no Windows): as contas abaixo são em LF
+    a.modelo.setEOL(window.monaco.editor.EndOfLineSequence.LF);
     const monaco = window.monaco, modelo = a.modelo;
     const total = blocos.reduce((s, b) => s + B.slice(b.b, b.bFim).join("\n").length, 0);
     const [minimo, quadros] = VELOCIDADES[this.velocidade] || VELOCIDADES.normal;
@@ -251,15 +255,15 @@ class JanelaTrabalho {
     const novas = [];
     // o texto atual em "linhas" (texto = linhas unidas por \n); onde começa a linha k
     const inicioDaLinha = k => { const L = modelo.getValue().split("\n"); let o = 0; for (let i = 0; i < k && i < L.length; i++) o += L[i].length + 1; return o; };
-    const decorarNovas = ate => this.decoracoes.set([...novas, ...ate].map(l => ({ range: new monaco.Range(l, 1, l, 1), options: { isWholeLine: true, className: "trab-linha-entra", overviewRuler: { color: "#4ade9f", position: 4 } } })));
+    const decorarNovas = ate => this.decoracoes.set([...novas, ...ate].map(l => ({ range: new monaco.Range(l, 1, l, 1), options: { isWholeLine: true, className: "trab-linha-entra", linesDecorationsClassName: "trab-barra entra", overviewRuler: { color: "#4ade9f", position: 4 } } })));
     for (const b of blocos) {
       // depois dos blocos anteriores, as linhas antes deste já são as do texto novo: o bloco começa na linha b.b
       const k = b.b, saem = b.aFim - b.a, entram = B.slice(b.b, b.bFim);
       this.editor.revealLineInCenterIfOutsideViewport(Math.min(k + 1, modelo.getLineCount()));
       if (saem) {
         // as linhas que saem ficam vermelhas por um instante e somem
-        this.decoracoes.set([...novas.map(l => ({ range: new monaco.Range(l, 1, l, 1), options: { isWholeLine: true, className: "trab-linha-entra" } })),
-          { range: new monaco.Range(k + 1, 1, k + saem, 1), options: { isWholeLine: true, className: "trab-linha-sai", overviewRuler: { color: "#ff6b7d", position: 4 } } }]);
+        this.decoracoes.set([...novas.map(l => ({ range: new monaco.Range(l, 1, l, 1), options: { isWholeLine: true, className: "trab-linha-entra", linesDecorationsClassName: "trab-barra entra" } })),
+          { range: new monaco.Range(k + 1, 1, k + saem, 1), options: { isWholeLine: true, className: "trab-linha-sai", linesDecorationsClassName: "trab-barra sai", overviewRuler: { color: "#ff6b7d", position: 4 } } }]);
         await esperar(this.velocidade === "lenta" ? 650 : 320);
         const n = modelo.getValue().split("\n").length, texto = modelo.getValue();
         let de = inicioDaLinha(k), ate = k + saem < n ? inicioDaLinha(k + saem) : texto.length;
@@ -303,7 +307,7 @@ class JanelaTrabalho {
   marcarNovas(blocos) {
     const monaco = window.monaco;
     const marcas = [];
-    for (const b of blocos) for (let l = b.b + 1; l <= b.bFim; l++) marcas.push({ range: new monaco.Range(l, 1, l, 1), options: { isWholeLine: true, className: "trab-linha-entra fim", overviewRuler: { color: "#4ade9f", position: 4 } } });
+    for (const b of blocos) for (let l = b.b + 1; l <= b.bFim; l++) marcas.push({ range: new monaco.Range(l, 1, l, 1), options: { isWholeLine: true, className: "trab-linha-entra fim", linesDecorationsClassName: "trab-barra entra fim", overviewRuler: { color: "#4ade9f", position: 4 } } });
     this.decoracoes.set(marcas);
     clearTimeout(this.timerMarcas);
     this.timerMarcas = setTimeout(() => this.decoracoes.clear(), 9000);
@@ -339,11 +343,24 @@ class JanelaTrabalho {
   async carregarHistorico() {
     try {
       const eventos = await api(`/api/sessoes/${encodeURIComponent(sessao)}/eventos`);
-      for (const e of (eventos || []).slice(0, 40).reverse()) this.eventoNoTempo(e.evento, e.ferramenta, e.resumo, e.quando ? new Date(e.quando).getTime() : Date.now());
+      // vêm do mais antigo ao mais novo; cada um entra no topo, então o mais novo fica em cima
+      for (const e of (eventos || []).slice(-40)) this.eventoNoTempo(e.evento, e.ferramenta, e.resumo, e.quando ? new Date(e.quando).getTime() : Date.now());
     } catch { /* sem histórico */ }
   }
 
+  /** Caminhos absolutos no resumo ficam curtos: relativos ao projeto, ou só a pasta e o arquivo. */
+  encurtar(texto) {
+    const pasta = String(this.info?.pasta || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return String(texto || "").replace(/(?<=^|[\s(])(?:[A-Za-z]:[\\/]|\/)[^\s"']+/g, caminho => {
+      const c = caminho.replace(/\\/g, "/");
+      if (pasta && c.toLowerCase().startsWith(pasta + "/")) return c.slice(pasta.length + 1);
+      const partes = c.split("/").filter(Boolean);
+      return partes.length > 2 ? `…/${partes.slice(-2).join("/")}` : caminho;
+    });
+  }
+
   eventoNoTempo(evento, ferramenta, resumo, quando = Date.now()) {
+    resumo = this.encurtar(resumo);
     if (evento === "PreToolUse" && ferramenta && !["Write", "Edit", "MultiEdit"].includes(ferramenta)) {
       this.adicionarTempo({ icone: ICONE_FERRAMENTA[ferramenta] || (String(ferramenta).startsWith("mcp__") ? "plug" : "tools"), texto: resumo || ferramenta, quando });
       $("#trab-agora").textContent = resumo || ferramenta;
