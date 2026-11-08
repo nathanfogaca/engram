@@ -375,6 +375,8 @@ function tratar(m) {
     if (m.acao === "criada") palco.ligar(m.a, m.b, { nascendo: true });
     else if (m.acao === "revisao") palco.marcarRevisao(m.a, m.b, m.revisa);
     else palco.desligarLocal(m.a, m.b);
+  } else if (m.tipo === "palco") {
+    if (m.acao === "organizado") palco.reposicionar(m.posicoes);
   } else if (m.tipo === "mensagem") {
     palco.mensagem(m.de, m.para, m.fase);
     if (m.fase === "enviada") {

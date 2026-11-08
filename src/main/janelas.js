@@ -17,7 +17,7 @@ const EVENTOS_GANCHO = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostT
 const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando', PreToolUse: 'trabalhando', PostToolUse: 'pensando', Stop: 'esperando você', Notification: 'precisa de você' };
 const LIVRE = new Set(['pronta', 'esperando você']);
 const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
-const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
+const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
 const PESSOA = 'pessoa'; // remetente das mensagens que a pessoa digita na vista Conversa
 const MAX_BUFFER = 400_000;
 const TAMANHO_PADRAO = [700, 470];
@@ -164,6 +164,7 @@ class Janelas {
     }
     this.reconectando = false;
     for (const s of this.cerebro.sessoes(50)) this.avisar({ tipo: 'sessao', sessao: this.info(s.id) });
+    this.avisarLigacoes([...this.ativas.keys()]);
   }
 
   // ---------------------------------------------------------------- abrir e fechar
@@ -245,12 +246,24 @@ class Janelas {
     if (mcps !== undefined) this.cerebro.sessaoMcps(id, escolhidos);
     if (posicao) this.cerebro.posicaoSalvar(id, ...posicaoValida(posicao));
     else if (!this.cerebro.posicao(id)) this.cerebro.posicaoSalvar(id, ...this.lugarLivre(ligarA));
-    if (ligarA && this.ativas.has(ligarA) && this.cerebro.conectar(ligarA, id)) this.avisar({ tipo: 'conexao', acao: 'criada', a: ligarA, b: id });
+    if (ligarA && this.ativas.has(ligarA)) this.cerebro.conectar(ligarA, id);
     if (tarefa) this.enfileirar(j, tarefa[0], tarefa[1]);
     const info = this.info(id);
     if (retomar && !continuar) info.conversa_nova = true;
     this.avisar({ tipo: 'sessao', sessao: info });
+    // as linhas só depois do cartão (a tela só desenha entre cartões que existem); vale também para a retomada
+    this.avisarLigacoes([id]);
     return info;
+  }
+
+  /** Avisa a tela das ligações destas janelas com outras abertas (e da revisão de cada uma). */
+  avisarLigacoes(ids) {
+    const quais = new Set(ids);
+    for (const c of this.cerebro.conexoes()) {
+      if (!(quais.has(c.a) || quais.has(c.b)) || !this.ativas.has(c.a) || !this.ativas.has(c.b)) continue;
+      this.avisar({ tipo: 'conexao', acao: 'criada', a: c.a, b: c.b });
+      if (c.revisa) this.avisar({ tipo: 'conexao', acao: 'revisao', a: c.a, b: c.b, revisa: c.revisa });
+    }
   }
 
   lugarLivre(pertoDe) {
@@ -526,9 +539,20 @@ class Janelas {
     };
   }
 
+  /** Com quem esta janela fala (ligações com janelas abertas), pelos nomes. */
+  falaCom(id) {
+    return [...this.cerebro.conectados(id)].filter(c => this.ativas.has(c)).map(c => this.cerebro.sessao(c)?.nome).filter(Boolean).sort();
+  }
+
   equipe(id) {
-    const colegas = [...this.cerebro.conectados(id)].sort().filter(c => this.ativas.has(c)).map(c => this.descricao(c));
+    const comLigacoes = c => ({ ...this.descricao(c), fala_com: this.falaCom(c) });
+    const colegas = [...this.cerebro.conectados(id)].sort().filter(c => this.ativas.has(c)).map(comLigacoes);
     const r = { voce: this.descricao(id), colegas, sua_pasta_de_arquivos: this.arquivos.pasta(id) };
+    if (this.cerebro.sessao(id)?.papel === 'maestro') {
+      // o maestro enxerga o palco inteiro, para ligar quem ainda não está no time
+      const fora = [...this.ativas.keys()].filter(c => c !== id && !this.cerebro.conectados(id).has(c)).sort().map(comLigacoes);
+      if (fora.length) r.no_palco_sem_ligacao_com_voce = fora;
+    }
     const revisor = this.revisorAtivo(id);
     if (revisor) r.suas_entregas_passam_por = `${this.cerebro.sessao(revisor).nome} (tudo o que você mandar vai para ele revisar antes de seguir)`;
     const revisados = this.cerebro.revisados(id).filter(x => this.ativas.has(x)).map(x => this.cerebro.sessao(x).nome);
@@ -608,6 +632,107 @@ class Janelas {
     } catch (e) {
       return `Não deu para criar: ${e.message}.`;
     }
+  }
+
+  // ---------------------------------------------------------------- o maestro monta o palco
+
+  ehMaestro(id) { return this.cerebro.sessao(id)?.papel === 'maestro'; }
+  nomeDe(id) { return this.cerebro.sessao(id)?.nome || id; }
+
+  /** As duas pontas pelo nome (só janelas abertas), ou a mensagem de erro. */
+  pontas(qa, qb) {
+    const a = this.achar(qa), b = this.achar(qb);
+    if (!a) return { erro: `Não há janela aberta chamada "${qa}". Veja os nomes com equipe.` };
+    if (!b) return { erro: `Não há janela aberta chamada "${qb}". Veja os nomes com equipe.` };
+    if (a === b) return { erro: 'As duas pontas são a mesma janela.' };
+    return { a, b };
+  }
+
+  ligarJanelas(de, qa, qb) {
+    if (!this.ehMaestro(de)) return 'Só o maestro liga agentes. Peça à pessoa (ela liga arrastando uma linha entre os cartões).';
+    const p = this.pontas(qa, qb);
+    if (p.erro) return p.erro;
+    const nomes = `${this.nomeDe(p.a)} e ${this.nomeDe(p.b)}`;
+    if (!this.cerebro.conectar(p.a, p.b)) return `${nomes} já estavam ligados.`;
+    this.avisar({ tipo: 'conexao', acao: 'criada', a: p.a, b: p.b });
+    return `Liguei ${nomes}: agora os dois conversam pelo enviar.`;
+  }
+
+  desligarJanelas(de, qa, qb, confirmarRevisao = false) {
+    if (!this.ehMaestro(de)) return 'Só o maestro desliga agentes. Peça à pessoa (ela clica na linha e escolhe remover).';
+    const p = this.pontas(qa, qb);
+    if (p.erro) return p.erro;
+    const nomes = `${this.nomeDe(p.a)} e ${this.nomeDe(p.b)}`;
+    const c = this.cerebro.conexoes().find(x => (x.a === p.a && x.b === p.b) || (x.a === p.b && x.b === p.a));
+    if (!c) return `${nomes} não estavam ligados.`;
+    if (c.revisa && !confirmarRevisao) {
+      const revisado = c.revisa === c.a ? c.b : c.a;
+      return `Não desliguei: nessa ligação ${this.nomeDe(c.revisa)} revisa as entregas de ${this.nomeDe(revisado)}, e desligar apaga a revisão junto. Confirme com a pessoa; se ela quiser mesmo, chame de novo com confirmar_revisao=true.`;
+    }
+    this.cerebro.desconectar(p.a, p.b);
+    this.avisar({ tipo: 'conexao', acao: 'removida', a: p.a, b: p.b });
+    let r = `Desliguei ${nomes}.${c.revisa ? ' A revisão dessa ligação saiu junto.' : ''}`;
+    // ninguém pode ficar sem caminho até o maestro sem que ele saiba
+    const isolados = [p.a, p.b].filter(x => !this.ehMaestro(x) && !this.alcanca(x, de)).map(x => this.nomeDe(x));
+    if (isolados.length) r += ` Atenção: ${isolados.join(' e ')} ficou sem nenhum caminho até você, nem por colegas: não consegue mais receber tarefas nem devolver resultados. Para religar, use ligar.`;
+    return r;
+  }
+
+  /** Há caminho de linhas (entre janelas abertas) de "de" até "ate"? */
+  alcanca(de, ate) {
+    const vistos = new Set([de]), fila = [de];
+    while (fila.length) {
+      const x = fila.shift();
+      if (x === ate) return true;
+      for (const y of this.cerebro.conectados(x)) if (this.ativas.has(y) && !vistos.has(y)) { vistos.add(y); fila.push(y); }
+    }
+    return false;
+  }
+
+  /** Arruma os cartões: "time" (maestro no centro, colegas em volta por papel) ou "lista" (posições dadas). */
+  organizarPalco(de, modo, posicoes) {
+    if (!this.ehMaestro(de)) return 'Só o maestro organiza o palco.';
+    const tamanho = id => { const p = this.cerebro.posicao(id); return p ? [p.w, p.h] : TAMANHO_PADRAO; };
+    const novas = [];
+    if (modo === 'lista') {
+      if (!Array.isArray(posicoes) || !posicoes.length) return 'No modo "lista", mande posicoes: [{ nome, x, y }].';
+      const desconhecidos = [];
+      for (const item of posicoes.slice(0, 40)) {
+        const id = this.achar(item?.nome);
+        if (!id) { desconhecidos.push(String(item?.nome ?? '')); continue; }
+        const [w, h] = tamanho(id);
+        const [x, y] = posicaoValida({ x: item.x, y: item.y, w, h });
+        novas.push({ id, x, y, w, h });
+      }
+      if (desconhecidos.length) return `Não mexi em nada: não há janela aberta chamada ${desconhecidos.map(n => `"${n}"`).join(', ')}. Veja os nomes com equipe.`;
+    } else if (modo === 'time') {
+      const papelDe = id => this.cerebro.sessao(id)?.papel || 'livre';
+      const colegas = [...this.ativas.keys()].filter(id => id !== de)
+        .sort((x, y) => papelDe(x).localeCompare(papelDe(y)) || this.nomeDe(x).localeCompare(this.nomeDe(y)));
+      const [mw, mh] = tamanho(de);
+      novas.push({ id: de, x: Math.round(-mw / 2), y: Math.round(-mh / 2), w: mw, h: mh });
+      if (colegas.length) {
+        // colegas numa elipse em volta do maestro, os do mesmo papel lado a lado; abre a elipse até ninguém encostar
+        const tams = colegas.map(tamanho);
+        const maiorW = Math.max(mw, ...tams.map(t => t[0])), maiorH = Math.max(mh, ...tams.map(t => t[1]));
+        let rx = maiorW + 160, ry = maiorH + 120, lugares = null;
+        for (let tentativa = 0; tentativa < 30 && !lugares; tentativa++, rx *= 1.1, ry *= 1.1) {
+          const p = colegas.map((id, i) => {
+            const ang = -Math.PI / 2 + (2 * Math.PI * i) / colegas.length;
+            const [w, h] = tams[i];
+            return { id, x: Math.round(rx * Math.cos(ang) - w / 2), y: Math.round(ry * Math.sin(ang) - h / 2), w, h };
+          });
+          const todos = [novas[0], ...p];
+          const bate = todos.some((r1, i) => todos.some((r2, j) => j > i && r1.x < r2.x + r2.w + 60 && r2.x < r1.x + r1.w + 60 && r1.y < r2.y + r2.h + 60 && r2.y < r1.y + r1.h + 60));
+          if (!bate) lugares = p;
+        }
+        novas.push(...(lugares || colegas.map((id, i) => ({ id, x: (i % 3) * (maiorW + 160) - maiorW, y: (Math.floor(i / 3) + 1) * (maiorH + 120), w: tams[i][0], h: tams[i][1] }))));
+      }
+    } else return 'Modo desconhecido: use "time" ou "lista".';
+    for (const n of novas) this.cerebro.posicaoSalvar(n.id, n.x, n.y, n.w, n.h);
+    this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: novas });
+    if (modo === 'lista') return `Movi ${novas.length === 1 ? '1 cartão' : `${novas.length} cartões`} no palco.`;
+    return `Organizei o palco: você no centro e ${novas.length - 1 === 1 ? '1 colega' : `${novas.length - 1} colegas`} em volta, agrupados por papel.`;
   }
 
   entregarArquivo(de, caminho, nome) {

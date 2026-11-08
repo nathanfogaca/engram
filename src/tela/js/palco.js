@@ -29,6 +29,7 @@ export class Palco {
     this.v = { x: innerWidth / 2 - TAM.w / 2, y: innerHeight / 2 - TAM.h / 2 + 30, z: 1 };
     this.cartoes = new Map();
     this.fios = new Map();
+    this.pendentes = new Map(); // ligações que chegaram antes de um dos cartões: desenhadas quando ele nascer
     this.brilhos = new Set();
     this.topo = 10;
     this.gesto = null;
@@ -122,6 +123,36 @@ export class Palco {
     const z = limitar(Math.min((innerWidth - 120) / (x2 - x1), (innerHeight - 200) / (y2 - y1), 1), 0.15, 1);
     this.v = { z, x: innerWidth / 2 - ((x1 + x2) / 2) * z, y: (innerHeight + 50) / 2 - ((y1 + y2) / 2) * z };
     this.aplicar(animado);
+  }
+
+  /** O maestro organizou o palco: os cartões deslizam até o lugar novo e a vista enquadra o time. */
+  reposicionar(posicoes) {
+    const voos = (posicoes || []).map(p => ({ c: this.cartoes.get(p.id), p })).filter(v => v.c)
+      .map(({ c, p }) => ({ c, de: { x: c.x, y: c.y, w: c.w, h: c.h }, para: { x: p.x, y: p.y, w: p.w || c.w, h: p.h || c.h } }));
+    if (!voos.length) return;
+    cancelAnimationFrame(this.quadroVoo);
+    const fim = () => {
+      for (const { c } of voos) this.ajustarTerm(c);
+      this.redesenharFios();
+      this.enquadrar(true);
+    };
+    if (movimentoReduzido) {
+      for (const { c, para } of voos) { Object.assign(c, para); this.posicionar(c); }
+      fim();
+      return;
+    }
+    const t0 = performance.now(), dur = 900;
+    const passo = t => {
+      const k = suave((t - t0) / dur);
+      for (const { c, de, para } of voos) {
+        for (const q of ["x", "y", "w", "h"]) c[q] = de[q] + (para[q] - de[q]) * k;
+        this.posicionar(c);
+      }
+      this.redesenharFios();
+      if (k < 1) this.quadroVoo = requestAnimationFrame(passo);
+      else fim();
+    };
+    this.quadroVoo = requestAnimationFrame(passo);
   }
 
   focar(id) {
@@ -265,6 +296,7 @@ export class Palco {
     this.posicionar(c);
     this.cartoes.set(info.id, c);
     this.trazerFrente(c);
+    this.ligarPendentes(info.id);
 
     cab.addEventListener("pointerdown", e => {
       if (e.button !== 0 || e.target.closest("button")) return;
@@ -488,7 +520,13 @@ export class Palco {
 
   ligar(a, b, { nascendo = false } = {}) {
     const k = this.chave(a, b);
-    if (this.fios.has(k) || !this.cartoes.has(a) || !this.cartoes.has(b)) return;
+    if (this.fios.has(k)) return;
+    if (!this.cartoes.has(a) || !this.cartoes.has(b)) {
+      this.pendentes.set(k, { a, b, revisa: this.pendentes.get(k)?.revisa ?? null });
+      return;
+    }
+    const pendente = this.pendentes.get(k);
+    this.pendentes.delete(k);
     const [pa, pb] = a < b ? [a, b] : [b, a];
     const id = `g${k.replace(/[^a-z0-9]/gi, "")}`;
     const s1 = svg("stop", { offset: "0" }), s2 = svg("stop", { offset: "1" });
@@ -519,9 +557,18 @@ export class Palco {
       f.g.style.setProperty("--len", String(Math.ceil(f.linha.getTotalLength())));
       setTimeout(() => f.g.classList.remove("nascendo"), 1400);
     }
+    if (pendente?.revisa) this.marcarRevisao(a, b, pendente.revisa);
+  }
+
+  /** Um cartão nasceu: desenha as ligações dele que estavam esperando. */
+  ligarPendentes(id) {
+    for (const p of [...this.pendentes.values()]) {
+      if ((p.a === id || p.b === id) && this.cartoes.has(p.a) && this.cartoes.has(p.b)) this.ligar(p.a, p.b, { nascendo: true });
+    }
   }
 
   desligarLocal(a, b) {
+    this.pendentes.delete(this.chave(a, b));
     const f = this.fios.get(this.chave(a, b));
     if (!f) return;
     this.fios.delete(f.k);
@@ -565,7 +612,11 @@ export class Palco {
   /** A ligação a-b passa a ter revisão (revisa = a ponta que revisa) ou deixa de ter (null). */
   marcarRevisao(a, b, revisa) {
     const f = this.fios.get(this.chave(a, b));
-    if (!f) return;
+    if (!f) {
+      const p = this.pendentes.get(this.chave(a, b));
+      if (p) p.revisa = revisa || null; // a linha ainda espera o cartão: a revisão entra junto
+      return;
+    }
     f.revisa = revisa || null;
     f.g.classList.toggle("revisao", !!f.revisa);
     // o fluxo corre na direção de quem revisa
