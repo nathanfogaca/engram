@@ -1,0 +1,15 @@
+{
+  "name": "engram-landing",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.jsx src/site.css --bundle --minify --jsx=automatic --entry-names=engram --loader:.woff2=copy --asset-names=[name] --outdir=assets"
+  },
+  "dependencies": {
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  }
+}
