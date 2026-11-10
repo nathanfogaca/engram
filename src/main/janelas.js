@@ -402,6 +402,8 @@ class Janelas {
     colunas = Math.max(20, Math.min(colunas | 0, 500));
     this.motor.mandar('tamanho', { id, linhas, colunas });
     j.tela.redimensionar(colunas, linhas);
+    // quem só espelha este terminal (a janela Visualizar trabalho) precisa do mesmo tamanho, senão a tela embaralha
+    this.avisar({ tipo: 'terminal', evento: 'tamanho', id, colunas, linhas });
   }
 
   /** Assina a saída do terminal: devolve o histórico e uma função para parar. */
@@ -409,7 +411,7 @@ class Janelas {
     const j = this.janela(id);
     if (!j) return null;
     j.ouvintes.add(cb);
-    return { historico: j.historico(), parar: () => j.ouvintes.delete(cb) };
+    return { historico: j.historico(), colunas: j.tela.colunas, linhas: j.tela.linhas, parar: () => j.ouvintes.delete(cb) };
   }
 
   // ---------------------------------------------------------------- conversa e arquivos

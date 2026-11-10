@@ -136,17 +136,41 @@ class JanelaTrabalho {
 
   // ---------------------------------------------------------------- terminal (só para olhar)
 
+  // O espelho tem de ter exatamente as colunas e linhas do terminal do agente: o CLI desenha a tela contando
+  // com esse tamanho, e num espelho de outro tamanho as linhas quebram em outro lugar e tudo embaralha.
+  // Então o tamanho vem do agente e, para caber na janela, o que muda é o tamanho da letra.
   abrirTerminal() {
-    if (this.term) { requestAnimationFrame(() => { try { this.fit.fit(); } catch { /* sem tamanho */ } }); return; }
-    const term = new Terminal({ fontFamily: '"Cascadia Mono", Consolas, monospace', fontSize: 13, lineHeight: 1.12, scrollback: 6000, disableStdin: true, cursorBlink: false,
+    if (this.term) { requestAnimationFrame(() => this.ajustarTerminal()); return; }
+    const term = new Terminal({ fontFamily: '"Cascadia Mono", Consolas, monospace', fontSize: 13, lineHeight: 1.12, scrollback: 6000, disableStdin: true, cursorBlink: false, cols: 100, rows: 28,
       theme: { background: "#070a10", foreground: "#dfe6f3", cursor: getComputedStyle(document.body).getPropertyValue("--cor") || "#8b7bff" } });
-    const fit = new FitAddon.FitAddon();
-    term.loadAddon(fit);
     term.open($("#trab-term"));
-    this.term = term; this.fit = fit;
-    window.engram.terminal.abrir(sessao, { aoInicio: () => term.reset(), aoDados: d => term.write(d), aoFim: () => term.write("\r\n\x1b[2m[a janela do agente fechou]\x1b[0m\r\n") });
-    new ResizeObserver(() => { try { fit.fit(); } catch { /* sem tamanho */ } }).observe($("#trab-term"));
-    requestAnimationFrame(() => { try { fit.fit(); } catch { /* sem tamanho */ } });
+    this.term = term;
+    window.engram.terminal.abrir(sessao, {
+      aoInicio: tam => { term.reset(); if (tam?.colunas) this.tamanhoTerminal(tam.colunas, tam.linhas); },
+      aoDados: d => term.write(d),
+      aoFim: () => term.write("\r\n\x1b[2m[a janela do agente fechou]\x1b[0m\r\n"),
+    });
+    new ResizeObserver(() => this.ajustarTerminal()).observe($("#trab-term"));
+    requestAnimationFrame(() => this.ajustarTerminal());
+  }
+
+  tamanhoTerminal(colunas, linhas) {
+    if (!this.term || !colunas || !linhas) return;
+    if (this.term.cols !== colunas || this.term.rows !== linhas) this.term.resize(colunas, linhas);
+    requestAnimationFrame(() => this.ajustarTerminal());
+  }
+
+  /** Escolhe o tamanho da letra para o terminal inteiro caber na área (entre 7 e 16). */
+  ajustarTerminal() {
+    const caixa = $("#trab-term"), t = this.term;
+    if (!t || caixa.hidden) return;
+    const tela = caixa.querySelector(".xterm-screen");
+    const largura = caixa.clientWidth - 22, altura = caixa.clientHeight - 14;
+    if (!tela || !tela.offsetWidth || largura <= 0 || altura <= 0) return;
+    const letra = t.options.fontSize;
+    const porLetraL = tela.offsetWidth / t.cols / letra, porLetraA = tela.offsetHeight / t.rows / letra; // quanto cada célula mede por ponto de letra
+    const nova = Math.max(7, Math.min(16, Math.floor(Math.min(largura / (t.cols * porLetraL), altura / (t.rows * porLetraA)) * 2) / 2));
+    if (nova !== letra) t.options.fontSize = nova;
   }
 
   // ---------------------------------------------------------------- arquivos e mudanças
@@ -375,6 +399,8 @@ class JanelaTrabalho {
     } else if (m.tipo === "evento" && m.sessao_id === sessao) {
       if (m.estado) this.mostrarEstado(m.estado);
       this.eventoNoTempo(m.evento, m.ferramenta, m.resumo);
+    } else if (m.tipo === "terminal" && m.evento === "tamanho" && m.id === sessao) {
+      this.tamanhoTerminal(m.colunas, m.linhas); // o terminal do agente mudou de tamanho: o espelho acompanha
     } else if (m.tipo === "sessao" && m.sessao?.id === sessao) {
       this.mostrarEstado(m.sessao.aberta === false ? "encerrada" : m.sessao.estado);
     }

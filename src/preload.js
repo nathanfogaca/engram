@@ -3,10 +3,10 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const terminais = new Map(); // id -> { aoInicio, aoDados, aoFim }
-ipcRenderer.on('terminal:dados', (_e, { id, dados, inicio }) => {
+ipcRenderer.on('terminal:dados', (_e, { id, dados, inicio, colunas, linhas }) => {
   const t = terminais.get(id);
   if (!t) return;
-  if (inicio) t.aoInicio?.();
+  if (inicio) t.aoInicio?.({ colunas, linhas });
   t.aoDados(dados);
 });
 ipcRenderer.on('terminal:fim', (_e, id) => { terminais.get(id)?.aoFim?.(); terminais.delete(id); });

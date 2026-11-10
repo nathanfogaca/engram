@@ -51,7 +51,7 @@ body.ocupado .trab-olho { animation: trab-respira 1.8s ease-in-out infinite; }
 .trab-hosts { position: relative; flex: 1; min-height: 0; background: var(--codigo); }
 .trab-host { position: absolute; inset: 0; }
 .trab-host[hidden] { display: none; }
-.trab-term { padding: 8px 6px 4px 12px; background: #070a10; }
+.trab-term { padding: 8px 6px 4px 12px; background: #070a10; overflow: auto; }
 .trab-vazio { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 10px; text-align: center; padding: 30px;
   background: radial-gradient(500px 280px at 50% 42%, color-mix(in srgb, var(--cor, var(--violeta)) 14%, transparent), transparent 70%), var(--codigo); }
 .trab-vazio[hidden] { display: none; }

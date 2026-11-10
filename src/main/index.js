@@ -186,7 +186,7 @@ function registrarIpc() {
     });
     if (!sub) { e.sender.send('terminal:dados', { id, dados: '\r\n\x1b[2m[esta janela não está aberta]\x1b[0m\r\n', inicio: true }); return; }
     assinaturas.set(chave, sub.parar);
-    e.sender.send('terminal:dados', { id, dados: sub.historico, inicio: true });
+    e.sender.send('terminal:dados', { id, dados: sub.historico, inicio: true, colunas: sub.colunas, linhas: sub.linhas });
     e.sender.once('destroyed', () => { sub.parar(); assinaturas.delete(chave); });
   });
   ipcMain.on('terminal:entrada', (_e, { id, dados }) => nucleo?.janelas.escrever(id, String(dados).slice(0, 65_536)));

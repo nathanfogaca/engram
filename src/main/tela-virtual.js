@@ -9,6 +9,8 @@ class TelaVirtual {
   escrever(texto) {
     try { this.t.write(texto); } catch { /* sequência estranha: só aquele trecho se perde */ }
   }
+  get colunas() { return this.t.cols; }
+  get linhas() { return this.t.rows; }
   redimensionar(colunas, linhas) {
     try { this.t.resize(colunas, linhas); } catch { /* ignora */ }
   }
