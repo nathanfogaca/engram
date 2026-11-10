@@ -129,6 +129,10 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
     try { janelas.confiarPasta(p.id); } catch (e) { throw new ErroRota(400, e.message); }
     return { ok: true };
   });
+  // responder, pela Conversa, a pergunta que o CLI do agente está fazendo no terminal (opção ou tecla)
+  rota('POST', '/api/sessoes/:id/responder', async (p, b) => {
+    try { return await janelas.responder(p.id, { opcao: b.opcao, tecla: b.tecla }); } catch (e) { throw new ErroRota(400, e.message); }
+  });
   rota('GET', '/api/sessoes/:id/arquivos', p => {
     exigir(cerebro.sessao(p.id), 404, 'janela não encontrada');
     return janelas.arquivos.listar(p.id);

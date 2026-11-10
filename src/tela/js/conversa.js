@@ -60,7 +60,9 @@ export class Conversa {
     this.digitando = el("div", { class: "conv-digitando", hidden: true }, el("i"), el("i"), el("i"), this.txtDigitando);
     this.avisoTexto = el("span");
     this.avisoBotoes = el("div", { class: "conv-aviso-botoes" });
-    this.aviso = el("div", { class: "conv-aviso", hidden: true }, this.avisoTexto, this.avisoBotoes);
+    this.avisoDetalhe = el("pre", { class: "conv-aviso-detalhe", hidden: true });
+    this.avisoOpcoes = el("div", { class: "conv-aviso-opcoes", hidden: true });
+    this.aviso = el("div", { class: "conv-aviso", hidden: true }, this.avisoTexto, this.avisoDetalhe, this.avisoOpcoes, this.avisoBotoes);
     this.perguntaAtual = null;
     this.rolo = el("div", { class: "conv-rolo" }, this.vazio, this.lista, this.digitando, this.aviso);
 
@@ -387,6 +389,8 @@ export class Conversa {
   }
 
   montarAviso(texto, botoes) {
+    this.aviso.classList.remove("pergunta");
+    this.avisoDetalhe.hidden = this.avisoOpcoes.hidden = true;
     this.avisoTexto.textContent = texto;
     this.avisoBotoes.replaceChildren(...botoes.map(([rotulo, acao, destaque]) => destaque
       ? el("button", { class: "btn-brilho pequeno", onclick: acao }, el("span", { text: rotulo }))
@@ -405,11 +409,37 @@ export class Conversa {
         }, true],
         ["Ver no terminal", () => this.aoTerminal?.(), false],
       ]);
+    } else if (p.opcoes?.length || p.rodape) {
+      this.montarPerguntaDoTerminal(p);
     } else {
       this.montarAviso(p.texto || "O agente está esperando uma resposta no terminal.", [["Abrir o terminal", () => this.aoTerminal?.(), true]]);
     }
     this.aviso.hidden = false;
     this.rolarFim(true);
+  }
+
+  /** A pergunta que o CLI do agente faz no terminal (pedir permissão, confirmar...), com as opções como botões. */
+  montarPerguntaDoTerminal(p) {
+    this.aviso.classList.add("pergunta");
+    this.avisoTexto.textContent = p.titulo || "O agente está esperando uma resposta.";
+    const detalhe = (p.detalhe || []).join("\n");
+    this.avisoDetalhe.textContent = detalhe;
+    this.avisoDetalhe.hidden = !detalhe.trim();
+    const responder = async corpo => {
+      const botoes = [...this.aviso.querySelectorAll("button")];
+      for (const b of botoes) b.disabled = true;
+      try { await api(`/api/sessoes/${this.id}/responder`, { json: corpo }); }
+      catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); for (const b of botoes) b.disabled = false; }
+    };
+    const opcoes = p.opcoes || [];
+    this.avisoOpcoes.replaceChildren(...opcoes.map(o => el("button", { class: `conv-opcao${o.atual ? " atual" : ""}`, onclick: () => responder({ opcao: o.n }) },
+      el("b", { text: String(o.n) }), el("span", { text: o.texto }))));
+    this.avisoOpcoes.hidden = !opcoes.length;
+    const tecla = (rotulo, t, dica) => el("button", { class: "btn pequeno conv-tecla", title: dica, text: rotulo, onclick: () => responder({ tecla: t }) });
+    // sem opções numeradas (um formulário, um "Enter para continuar"): as teclas que o terminal espera
+    const teclas = opcoes.length ? [tecla("Esc", "esc", "Cancelar (Esc)")]
+      : [tecla("↑", "cima", "Seta para cima"), tecla("↓", "baixo", "Seta para baixo"), tecla("←", "esquerda", "Seta para a esquerda"), tecla("→", "direita", "Seta para a direita"), tecla("Enter", "enter", "Confirmar (Enter)"), tecla("Esc", "esc", "Cancelar (Esc)")];
+    this.avisoBotoes.replaceChildren(...teclas, el("button", { class: "btn pequeno", text: "Ver no terminal", onclick: () => this.aoTerminal?.() }));
   }
 }
 

@@ -17,6 +17,8 @@ const EVENTOS_GANCHO = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostT
 const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando', PreToolUse: 'trabalhando', PostToolUse: 'pensando', Stop: 'esperando você', Notification: 'precisa de você' };
 const LIVRE = new Set(['pronta', 'esperando você']);
 const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
+const { lerPergunta, TECLAS, TRABALHANDO } = require('./pergunta');
+const OCUPADO_ESTADO = new Set(['pensando', 'trabalhando']);
 const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
 // as cores dos setores, as mesmas da tela (src/tela/js/setores.js)
 const CORES_SETOR = { violeta: '#8b7bff', ciano: '#38d6f5', magenta: '#e879f9', ambar: '#ffc857', verde: '#4ade9f', coral: '#ff7a6b' };
@@ -453,6 +455,114 @@ class Janelas {
     this.avisar({ tipo: 'evento', sessao_id: id, evento: 'Pergunta', estado: 'iniciando', pergunta: null, toques: [] });
   }
 
+  /**
+   * A pergunta que o CLI está fazendo agora, lida da tela (o que ele pergunta, o detalhe e as opções): é o que
+   * a vista Conversa mostra com botões. Roda a cada volta do vigia, para todos os agentes.
+   * Nos agentes com ganchos também acerta o estado em dois casos que os ganchos não avisam: um diálogo que
+   * aparece sozinho no meio da sessão, e a pergunta que some (respondida no terminal ou recusada).
+   */
+  olharPergunta(id, j, a) {
+    if (j.pergunta?.tipo === 'confiar_pasta') return;
+    const agora = Date.now();
+    const tela = j.tela.texto(40);
+    const lida = lerPergunta(tela);
+    const trabalhando = () => TRABALHANDO.test(tela.split('\n').slice(-8).join('\n'));
+    const mudar = (estado, pergunta) => {
+      j.estado = estado;
+      j.pergunta = pergunta;
+      j.perguntaAssinatura = pergunta ? JSON.stringify(pergunta) : null;
+      this.cerebro.sessaoEstado(id, estado);
+      this.avisar({ tipo: 'evento', sessao_id: id, evento: 'Pergunta', estado, pergunta, toques: [] });
+      if (LIVRE.has(estado)) this.tentarEntregar(j, 600);
+    };
+    if (lida) {
+      const p = { tipo: 'terminal', texto: lida.titulo || 'O agente está esperando uma resposta no terminal.', titulo: lida.titulo, detalhe: lida.detalhe, opcoes: lida.opcoes, rodape: lida.rodape };
+      j.perguntaLida = true;
+      j.semPerguntaDesde = 0;
+      if (j.estado !== 'precisa de você') {
+        if (!a.ganchos) return; // sem ganchos, quem decide o estado é o estadoPelaTela (que também lê a pergunta)
+        // um diálogo que os ganchos não avisaram: só vale com a tela parada há um instante, e não logo depois de uma resposta
+        if (tela !== j.telaPergunta) { j.telaPergunta = tela; j.telaPerguntaEm = agora; return; }
+        if (agora - j.telaPerguntaEm < 1500 || agora - (j.respondeuEm || 0) < 2500) return;
+        mudar('precisa de você', p);
+        return;
+      }
+      if (JSON.stringify(p) !== j.perguntaAssinatura) mudar('precisa de você', p);
+      return;
+    }
+    j.telaPergunta = null;
+    if (!a.ganchos) return;
+    if (j.estado === 'precisa de você') {
+      // o gancho avisou, mas não há pergunta legível na tela. Se nunca houve e a tela é a mesma de quando ele
+      // avisou, o diálogo ainda está lá (num formato que não sei ler): fica como está. Se a tela mudou, a
+      // pergunta foi respondida no terminal ou recusada: o estado passa a sair da tela.
+      if (!j.perguntaLida) {
+        if (j.telaPrecisa === undefined) { j.telaPrecisa = tela; return; }
+        if (tela === j.telaPrecisa) return;
+      }
+      if (!j.semPerguntaDesde) { j.semPerguntaDesde = agora; return; }
+      if (agora - j.semPerguntaDesde > 2000) mudar(trabalhando() ? 'trabalhando' : 'esperando você', null);
+      return;
+    }
+    j.semPerguntaDesde = 0;
+    // depois de uma resposta dada pela Conversa: se nenhum gancho chegar e a tela mostrar o agente parado,
+    // ele recusou ou cancelou (o Claude não avisa o fim do turno nesse caso)
+    if (j.aposResposta && OCUPADO_ESTADO.has(j.estado)) {
+      if (trabalhando()) j.aposResposta = agora;
+      else if (agora - j.aposResposta > 4000) { j.aposResposta = 0; mudar('esperando você', null); }
+    }
+  }
+
+  /** Responde a pergunta do CLI pela Conversa: uma opção (pelo número) ou uma tecla (enter, esc, setas...). */
+  async responder(id, { opcao, tecla } = {}) {
+    const j = this.ativas.get(id);
+    if (!j) throw new Error('janela não está aberta');
+    const espera = ms => new Promise(r => setTimeout(r, ms));
+    const ler = () => lerPergunta(j.tela.texto(40));
+    if (tecla !== undefined) {
+      const bytes = TECLAS[String(tecla)];
+      if (!bytes) throw new Error('tecla desconhecida');
+      j.escrever(bytes);
+      if (tecla === 'enter' || tecla === 'esc' || tecla === 'sim' || tecla === 'nao') this.respondida(id, j);
+      return { ok: true };
+    }
+    const n = Number(opcao);
+    let p = ler();
+    if (!p || !p.opcoes.some(o => o.n === n)) throw new Error('essa pergunta já saiu da tela');
+    // anda com as setas até a opção e confere na tela antes do Enter: nunca confirma a opção errada
+    for (let passo = 0; passo < 24; passo++) {
+      const atual = p.opcoes.find(o => o.atual);
+      if (!atual) throw new Error('não achei a opção marcada: responda no terminal');
+      if (atual.n === n) { j.escrever('\r'); this.respondida(id, j); return { ok: true }; }
+      j.escrever(atual.n < n ? TECLAS.baixo : TECLAS.cima);
+      let mudou = false;
+      for (let k = 0; k < 12 && !mudou; k++) { // espera a tela redesenhar (até ~0,7 s)
+        await espera(60);
+        const q = ler();
+        if (!q || !q.opcoes.some(o => o.n === n)) throw new Error('a pergunta mudou: confira no terminal');
+        if (q.opcoes.find(o => o.atual)?.n !== atual.n) { p = q; mudou = true; }
+      }
+      if (!mudou) throw new Error('a opção não se moveu: responda no terminal');
+    }
+    throw new Error('não consegui marcar essa opção: responda no terminal');
+  }
+
+  respondida(id, j) {
+    j.respondeuEm = Date.now();
+    j.pergunta = null;
+    j.perguntaAssinatura = null;
+    j.perguntaLida = false;
+    j.telaPrecisa = undefined;
+    j.semPerguntaDesde = 0;
+    const a = this.provedores.adaptador(j.provedor) || {};
+    if (a.ganchos && j.estado === 'precisa de você') {
+      j.estado = 'pensando';
+      j.aposResposta = Date.now();
+      this.cerebro.sessaoEstado(id, j.estado);
+    }
+    this.avisar({ tipo: 'evento', sessao_id: id, evento: 'Pergunta', estado: j.estado, pergunta: null, toques: [] });
+  }
+
   /** Agentes sem ganchos (Codex, Gemini, OpenCode): o estado sai da tela e do aviso de fim de turno. */
   estadoPelaTela(id, j, a) {
     const agora = Date.now();
@@ -460,7 +570,7 @@ class Janelas {
     if (tela !== j.telaAnterior) { j.telaAnterior = tela; j.telaMudouEm = agora; }
     const fim = tela.split('\n').slice(-12).join('\n');
     let novo;
-    if ((a.pergunta || PERGUNTA_TELA).test(fim)) novo = 'precisa de você';
+    if ((a.pergunta || PERGUNTA_TELA).test(fim) || lerPergunta(tela)) novo = 'precisa de você';
     else if (a.ocupado && a.ocupado.test(fim)) novo = 'trabalhando';
     else if (agora < j.ocupadoAte || agora - j.telaMudouEm < 2500 || agora - j.criadaEm < 4000) return;
     else novo = j.teveTurno ? 'esperando você' : 'pronta';
@@ -471,6 +581,7 @@ class Janelas {
     const antes = j.estado;
     j.estado = novo;
     j.pergunta = novo === 'precisa de você' ? { tipo: 'terminal', texto: 'O agente está esperando uma resposta no terminal.' } : null;
+    j.perguntaAssinatura = null; // o olharPergunta completa com as opções lidas da tela
     this.cerebro.sessaoEstado(id, novo);
     this.avisar({ tipo: 'evento', sessao_id: id, evento: origem, estado: novo, pergunta: j.pergunta, toques: [] });
     if (LIVRE.has(novo)) this.tentarEntregar(j, antes === 'iniciando' ? 1500 : 600);
@@ -505,6 +616,7 @@ class Janelas {
     for (const [id, j] of this.ativas) {
       const a = this.provedores.adaptador(j.provedor) || {};
       if (a.ganchos) this.verificarPergunta(id, j); else this.estadoPelaTela(id, j, a);
+      try { this.olharPergunta(id, j, a); } catch { /* tela estranha: fica para a próxima volta */ }
       if (!j.conversa) j.conversa = this.acharConversa(id, j);
       if (j.conversa) {
         let tam = j.conversaTam;
@@ -1019,6 +1131,14 @@ class Janelas {
     }
     if (estado) { j.estado = estado; this.cerebro.sessaoEstado(id, estado); }
     if (evento === 'SessionStart' || evento === 'UserPromptSubmit') j.pergunta = null;
+    j.aposResposta = 0; // chegou um gancho: o estado volta a vir deles
+    let semPergunta; // undefined = a tela não mexe na pergunta que está mostrando
+    if (estado === 'precisa de você') {
+      // começa um pedido: o vigia lê a pergunta e as opções da tela (olharPergunta)
+      if (!j.pergunta) { j.perguntaLida = false; j.telaPrecisa = undefined; j.semPerguntaDesde = 0; j.perguntaAssinatura = null; }
+    } else if (estado && j.pergunta?.tipo === 'terminal') {
+      j.pergunta = null; j.perguntaAssinatura = null; semPergunta = null; // o agente seguiu: a pergunta sai da Conversa
+    }
     const resumo = resumoEvento(evento, ferramenta, entrada, String(dados.mensagem || ''));
     if (['UserPromptSubmit', 'PreToolUse', 'Stop', 'Notification', 'SessionStart'].includes(evento)) this.cerebro.registrarEvento(id, evento, ferramenta, resumo);
     const toques = evento === 'PostToolUse' ? this.toques(ferramenta, entrada) : [];
@@ -1026,7 +1146,7 @@ class Janelas {
       this.cerebro.registrarToque(id, destino, tipo);
       if (tipo === 'gravou' && rel) this.cerebro.sincronizarArquivo(rel).then(erro => this.avisar({ tipo: 'cerebro', mudou: rel, erro }));
     }
-    this.avisar({ tipo: 'evento', sessao_id: id, evento, estado, ferramenta, resumo, toques: toques.map(([d, t]) => ({ destino: d, tipo: t })) });
+    this.avisar({ tipo: 'evento', sessao_id: id, evento, estado, ferramenta, resumo, toques: toques.map(([d, t]) => ({ destino: d, tipo: t })), ...(semPergunta === null ? { pergunta: null } : {}) });
     try { this.aoEvento?.(id, evento, ferramenta, entrada); } catch { /* quem acompanha não atrapalha o agente */ }
     if (evento === 'SessionStart') this.tentarEntregar(j, 2000); // a tela do agente ainda está montando
     else if (evento === 'Stop' || evento === 'Notification') this.tentarEntregar(j, 600);
