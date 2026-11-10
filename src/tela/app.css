@@ -584,6 +584,8 @@ mark { background: rgb(var(--acento1) / .3); color: var(--texto-forte); border-r
 .leitor-corpo { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 /* ------------------------------------------------------------------ cérebro */
+/* as camadas de trás do cérebro (fundo e córtex; fibras): só desenho, o mouse é da tela de cima */
+.cerebro-camada { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
 #cerebro-tela { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
 #cerebro-tela.sobre { cursor: pointer; }
 #cerebro-tela.arrastando { cursor: grabbing; }

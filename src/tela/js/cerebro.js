@@ -1,8 +1,13 @@
 // Cérebro: o grafo de notas como uma rede de neurônios dentro de dois hemisférios (vistos de cima).
 // Cada nota é um neurônio (corpo, núcleo e dendritos); as ligações são fibras curvas; impulsos correm
 // pelas fibras quando um agente toca uma nota (pulso/cometa) e, de vez em quando, sozinhos.
+//
+// Desempenho (centenas de notas, milhares de fibras): três camadas uma sobre a outra — fundo e córtex;
+// fibras, desenhadas na placa de vídeo (fibras-gl.js); neurônios, impulsos e rótulos (esta tela). Os neurônios
+// vêm prontos de um atlas, só é desenhado o que aparece na tela e a reação em cadeia dos impulsos tem teto.
 
 import { COR_TIPO, corModelo, nomeModelo, limitar, movimentoReduzido, NOME_TIPO_UM } from "./util.js";
+import { FibrasGL } from "./fibras-gl.js";
 
 // de que lado mora cada tipo: esquerdo (casos e memória) e direito (estrutura)
 const LADO = { chamado: -1, padrao: -1, guia: -1, sessao: -1, pendente: -1, sistema: 1, tabela: 1, projeto: 1 };
@@ -34,6 +39,15 @@ export class Cerebro {
     this.ocultos = new Set();
     this.impulsos = [];
     this.aneis = [];
+    this.lotes = new Map(); // fibras em repouso, por cor: um traço só por lote
+    this.acesas = [];
+    this.candidatos = [];
+    this.ocupados = [];
+    this.halos = new Map(); // cor → brilho redondo pronto
+    this.atlasLonge = this.novoAtlas(0.9);
+    this.atlasPerto = this.novoAtlas(2);
+    this.filaPerto = new Map(); // neurônios à espera da imagem de resolução alta
+    this.porCor = new Map(); // cor → neurônios (os halos saem agrupados por cor)
     this.ativo = false;
     this.ajustado = false;
     this.dpr = 1;
@@ -42,6 +56,15 @@ export class Cerebro {
     this.fundo = null;
     this.mouse = { x: innerWidth / 2, y: innerHeight / 2 };
     this.proximoDisparo = 0;
+    this.geoSuja = true; // alguma posição mudou: as fibras precisam ser refeitas
+    // três camadas, uma sobre a outra: fundo e córtex; fibras (na placa de vídeo); neurônios e rótulos (esta tela)
+    this.telaTras = document.createElement("canvas");
+    this.telaTras.className = "cerebro-camada";
+    this.ctxTras = this.telaTras.getContext("2d");
+    tela.before(this.telaTras);
+    try { this.gl = new FibrasGL(); this.gl.tela.className = "cerebro-camada"; tela.before(this.gl.tela); }
+    catch { this.gl = null; } // sem WebGL2: as fibras saem no desenho comum, na camada de trás
+    this.trasChave = "";
     this.instalar();
     this.redimensionar();
   }
@@ -57,14 +80,21 @@ export class Cerebro {
         ...n, x: v?.x, y: v?.y, vx: 0, vy: 0,
         fase: v?.fase ?? Math.random() * Math.PI * 2, act: v?.act || 0, pot: 0, refr: 0,
         brilho: v ? v.brilho : 0, // neurônio novo nasce apagado e acende
-        grau: 0, preso: false, sprite: null,
+        grau: 0, preso: false,
         cor: n.tipo === "agente" ? corModelo(n.modelo) : COR_TIPO[n.tipo] || "#8b95aa",
       });
     }
     this.nos = novos;
     this.arestas = grafo.arestas
       .filter(a => novos.has(a.origem) && novos.has(a.destino) && a.origem !== a.destino)
-      .map(a => ({ ...a, de: novos.get(a.origem), para: novos.get(a.destino), sinal: hashTexto(a.origem + a.destino) % 2 ? 1 : -1 }));
+      .map(a => {
+        const de = novos.get(a.origem), para = novos.get(a.destino);
+        return {
+          ...a, de, para, sinal: hashTexto(a.origem + a.destino) % 2 ? 1 : -1, brilho: 0,
+          c0: de.cor, c1: para.cor, cm: mistura(de.cor, para.cor, .5),
+          guia: de.tipo === "guia" || para.tipo === "guia", agente: de.tipo === "agente" || para.tipo === "agente",
+        };
+      });
     this.vizinhos = new Map();
     this.adj = new Map([...novos.keys()].map(id => [id, []]));
     for (const a of this.arestas) {
@@ -78,9 +108,12 @@ export class Cerebro {
     }
     for (const n of novos.values()) {
       n.r = (RAIO[n.tipo] || 4.5) + (n.tipo === "agente" || n.tipo === "pendente" ? 0 : Math.min(7, Math.sqrt(n.grau) * 1.6));
-      const antes = antigos.get(n.id);
-      if (antes && antes.r === n.r && antes.cor === n.cor) n.sprite = antes.sprite;
     }
+    this.geoSuja = true;
+    this.porCor = new Map();
+    for (const n of novos.values()) { if (!this.porCor.has(n.cor)) this.porCor.set(n.cor, []); this.porCor.get(n.cor).push(n); }
+    // sobrou desenho de neurônio que não existe mais (ou mudou de tamanho): recomeça os atlas
+    for (const a of ["atlasLonge", "atlasPerto"]) if (this[a].vagas.size > novos.size * 1.6 + 60) { this[a] = this.novoAtlas(this[a].res); this.filaPerto.clear(); }
     const tamAntes = this.tamHemi;
     this.medirHemisferios();
     if (!this.cortex || Math.abs(this.tamHemi - tamAntes) / tamAntes > 0.08) this.cortex = null;
@@ -141,10 +174,12 @@ export class Cerebro {
   // ---------------------------------------------------------------- simulação
 
   passo(forcar = false) {
-    const nos = [...this.nos.values()].filter(n => !this.ocultos.has(n.tipo));
-    const notas = nos.filter(n => n.tipo !== "agente");
+    const ocultos = this.ocultos;
     const alfa = this.calor;
     if (alfa > 0.05 || forcar) {
+      const notas = [];
+      for (const n of this.nos.values()) if (n.tipo !== "agente" && !ocultos.has(n.tipo)) notas.push(n);
+      this.geoSuja = true;
       const rep = 5200 * Math.max(alfa, .2);
       for (let i = 0; i < notas.length; i++) {
         const a = notas[i];
@@ -181,18 +216,35 @@ export class Cerebro {
       this.calor = Math.max(0.03, this.calor * 0.985);
     }
     // agentes em fila embaixo, como o tronco que lê o cérebro
-    const ag = nos.filter(n => n.tipo === "agente");
-    ag.forEach((n, i) => { n.x = (i - (ag.length - 1) / 2) * 130; n.y = this.tamHemi * 1.22 + (i % 2) * 26; });
+    let total = 0, i = 0;
+    for (const n of this.nos.values()) if (n.tipo === "agente" && !ocultos.has(n.tipo)) total++;
+    for (const n of this.nos.values()) {
+      if (n.tipo !== "agente" || ocultos.has(n.tipo)) continue;
+      const x = (i - (total - 1) / 2) * 130, y = this.tamHemi * 1.22 + (i % 2) * 26;
+      if (n.x !== x || n.y !== y) { n.x = x; n.y = y; this.geoSuja = true; }
+      i++;
+    }
   }
 
   // ---------------------------------------------------------------- impulsos
 
-  disparar(n, forca = 1, cor = null) {
+  /**
+   * O neurônio dispara: acende e manda impulsos pelas fibras dele. Num cérebro cheio isso virava uma
+   * tempestade (cada disparo provocava outros, sem parar), então há dois limites: um neurônio muito ligado
+   * sorteia até 12 fibras por disparo, e há um teto de impulsos correndo ao mesmo tempo ("teto": o disparo
+   * que vem de um agente passa de um teto bem mais alto).
+   */
+  disparar(n, forca = 1, cor = null, teto = 150) {
     const agora = performance.now();
     if (!n || agora < n.refr) return;
     n.act = Math.min(1.4, n.act + forca); n.refr = agora + 700; n.pot = 0;
-    for (const { no, e } of this.adj.get(n.id) || []) {
-      if (this.ocultos.has(no.tipo) || no.tipo === "guia" || n.tipo === "guia") continue;
+    if (n.tipo === "guia") return;
+    const vizinhos = this.adj.get(n.id) || [];
+    const passo = Math.max(1, vizinhos.length / 12);
+    for (let k = Math.random() * passo; k < vizinhos.length; k += passo) {
+      if (this.impulsos.length >= teto) break;
+      const { no, e } = vizinhos[Math.floor(k)];
+      if (this.ocultos.has(no.tipo) || no.tipo === "guia") continue;
       this.lancar(e, n, no, cor || n.cor);
     }
   }
@@ -207,7 +259,7 @@ export class Cerebro {
     const alvo = imp.para;
     alvo.pot += 0.75;
     if (imp.cometa) { alvo.act = Math.min(1.4, alvo.act + .9); return; }
-    if (alvo.pot >= 1 && Math.random() < 0.5) this.disparar(alvo, .9);
+    if (alvo.pot >= 1 && Math.random() < 0.5 && this.impulsos.length < 70) this.disparar(alvo, .9); // a cadeia só segue se o cérebro não estiver cheio de impulsos
     else alvo.act = Math.min(1, alvo.act + .35);
   }
 
@@ -217,7 +269,7 @@ export class Cerebro {
     if (!n) return;
     this.aneis.push({ n, cor: cor || n.cor, t0: performance.now() });
     n.refr = 0;
-    this.disparar(n, 1.2, cor);
+    this.disparar(n, 1.2, cor, 400);
   }
 
   /** Um impulso corre de um nó a outro (agente → nota, colega → colega). */
@@ -295,19 +347,95 @@ export class Cerebro {
     this.dpr = Math.min(devicePixelRatio || 1, 2);
     this.tela.width = Math.floor(innerWidth * this.dpr);
     this.tela.height = Math.floor(innerHeight * this.dpr);
+    this.telaTras.width = this.tela.width; this.telaTras.height = this.tela.height;
+    this.gl?.tamanho(this.tela.width, this.tela.height);
     this.fundo = null;
+    this.trasChave = "";
   }
 
   // ---------------------------------------------------------------- desenho pré-pronto (neurônio, córtex, fundo)
 
-  neuronio(n) {
-    if (n.sprite) return n.sprite;
+  // Os neurônios ficam prontos num atlas: poucas imagens grandes com todos dentro, em vez de uma imagem por
+  // neurônio (com centenas de notas, trocar de imagem a cada neurônio era o que mais pesava no quadro).
+  // Dois atlas: "longe" (resolução baixa, todos os neurônios) e "perto" (resolução alta, feito aos poucos
+  // só para quem aparece na tela com zoom).
+
+  novoAtlas(res) { return { res, paginas: [], vagas: new Map(), obra: [], emObra: new Set(), ocioso: 0 }; }
+
+  vaga(atlas, lado) {
+    const TAM = 2048;
+    let p = atlas.paginas[atlas.paginas.length - 1];
+    if (p && p.x + lado > TAM) { p.x = 0; p.y += p.linha; p.linha = 0; }
+    if (!p || p.y + lado > TAM) {
+      const canvas = document.createElement("canvas"); canvas.width = canvas.height = TAM;
+      p = { canvas, ctx: canvas.getContext("2d"), x: 0, y: 0, linha: 0 };
+      atlas.paginas.push(p);
+    }
+    const v = { canvas: p.canvas, ctx: p.ctx, x: p.x, y: p.y, lado };
+    p.x += lado; p.linha = Math.max(p.linha, lado);
+    return v;
+  }
+
+  /** A imagem pronta do neurônio: { canvas, x, y, lado, tam } (o pedaço do atlas e o tamanho no mundo). */
+  neuronio(n, perto = false) {
+    const chave = `${n.id}|${n.r}|${n.cor}`;
+    if (perto) {
+      const s = this.atlasPerto.vagas.get(chave);
+      if (s) return s;
+      // entra na fila: construirPerto() faz fora do desenho; até lá (e enquanto a página não fica pronta) vale o de longe
+      if (!this.atlasPerto.emObra.has(chave)) this.filaPerto.set(chave, n);
+    }
+    return this.atlasLonge.vagas.get(chave) || this.pintarNoAtlas(this.atlasLonge, n, chave, true);
+  }
+
+  pintarNoAtlas(atlas, n, chave, publicar) {
+    const tam = Math.ceil((n.r * 5.1 + n.r * 2) * 2 + 8);
+    const lado = Math.ceil(tam * atlas.res) + 2; // 1 ponto de folga de cada lado: o vizinho não vaza na ampliação
+    const v = this.vaga(atlas, lado);
+    const x = v.ctx;
+    x.save();
+    x.beginPath(); x.rect(v.x + 1, v.y + 1, lado - 2, lado - 2); x.clip();
+    x.translate(v.x + lado / 2, v.y + lado / 2); x.scale(atlas.res, atlas.res);
+    this.pintarNeuronio(x, n);
+    x.restore();
+    const s = { canvas: v.canvas, x: v.x + 1, y: v.y + 1, lado: lado - 2, tam: (lado - 2) / atlas.res };
+    if (publicar) atlas.vagas.set(chave, s);
+    return s;
+  }
+
+  /** Faz, alguns por quadro, os neurônios de resolução alta pedidos; a página só entra em uso quando fica pronta. */
+  construirPerto() {
+    const a = this.atlasPerto;
+    const publicar = () => {
+      for (const [chave, s] of a.obra) a.vagas.set(chave, s);
+      a.obra = [];
+      const p = a.paginas[a.paginas.length - 1];
+      if (p) p.y = 4096; // a página publicada não recebe mais nada: a próxima leva vai para uma nova
+    };
+    if (!this.filaPerto.size) {
+      if (a.obra.length && ++a.ocioso > 4) publicar();
+      return;
+    }
+    if (a.paginas.length > 10) { this.atlasPerto = this.novoAtlas(a.res); this.filaPerto.clear(); return; } // demais na memória: recomeça
+    a.ocioso = 0;
+    let feitos = 0;
+    for (const [chave, n] of this.filaPerto) {
+      this.filaPerto.delete(chave);
+      if (a.vagas.has(chave) || a.emObra.has(chave)) continue;
+      const antes = a.paginas[a.paginas.length - 1];
+      const s = this.pintarNoAtlas(a, n, chave, false);
+      if (antes && s.canvas !== antes.canvas && a.obra.length) { for (const [k, v] of a.obra) a.vagas.set(k, v); a.obra = []; } // a página anterior encheu: entra em uso
+      a.obra.push([chave, s]);
+      a.emObra.add(chave);
+      if (++feitos >= 16) break;
+    }
+  }
+
+  /** Desenha um neurônio (dendritos, corpo e núcleo) centrado em 0,0. O mesmo id dá sempre o mesmo desenho. */
+  pintarNeuronio(x, n) {
     const c = n.cor, rnd = semente(hashTexto(n.id));
     const agente = n.tipo === "agente";
     const alcance = n.r * 5.1;
-    const tam = Math.ceil((alcance + n.r * 2) * 2 + 8);
-    const oc = document.createElement("canvas"); oc.width = oc.height = tam * 2;
-    const x = oc.getContext("2d"); x.scale(2, 2); x.translate(tam / 2, tam / 2);
     x.lineCap = "round";
     // dendritos: ramos que saem do corpo e se dividem, mais finos a cada divisão
     const ramo = (px, py, ang, comp, larg, prof) => {
@@ -354,8 +482,6 @@ export class Cerebro {
     x.strokeStyle = rgba(mistura(corpoCor, "#ffffff", .5), .6); x.lineWidth = .8; x.stroke();
     x.fillStyle = rgba("#ffffff", agente ? .95 : .8);
     x.beginPath(); x.arc(n.r * .08, n.r * .05, n.r * (agente ? .42 : .3), 0, 6.28); x.fill();
-    n.sprite = { canvas: oc, tam };
-    return n.sprite;
   }
 
   desenharCortex() {
@@ -423,12 +549,82 @@ export class Cerebro {
     return this.destaque;
   }
 
-  curva(e, t) {
-    const a = e.de, b = e.para;
-    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dx = b.x - a.x, dy = b.y - a.y;
-    const k = 0.18 * (e.sinal || 1);
-    const cx = mx - dy * k, cy = my + dx * k;
-    return [(1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * cx + t * t * b.x, (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * cy + t * t * b.y, cx, cy];
+  /** A parte do mundo que aparece na tela, com folga: o que está fora não é desenhado. */
+  janela(folga = 0) {
+    const { x, y, z } = this.v;
+    return [-x / z - folga, -y / z - folga, (innerWidth - x) / z + folga, (innerHeight - y) / z + folga];
+  }
+
+  /** O brilho redondo de uma cor, pronto (um por cor): desenhar a imagem é bem mais leve que um degradê por neurônio. */
+  halo(cor) {
+    let h = this.halos.get(cor);
+    if (!h) {
+      h = document.createElement("canvas"); h.width = h.height = 128;
+      const x = h.getContext("2d"), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+      g.addColorStop(0, rgba(cor, 1)); g.addColorStop(1, rgba(cor, 0));
+      x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+      this.halos.set(cor, h);
+    }
+    return h;
+  }
+
+  /** Guarda um trecho de fibra no lote da cor dele (todos os trechos de um lote saem num traço só). */
+  porNoLote(cor, alfa, x0, y0, cx, cy, x1, y1) {
+    const chave = alfa > 0.15 ? `${cor}a` : cor;
+    let l = this.lotes.get(chave);
+    if (!l) { l = { cor, alfa, p: [], n: 0 }; this.lotes.set(chave, l); }
+    const p = l.p; let n = l.n;
+    p[n++] = x0; p[n++] = y0; p[n++] = cx; p[n++] = cy; p[n++] = x1; p[n++] = y1;
+    l.n = n;
+  }
+
+  /** As fibras no desenho comum (2D): reserva para quando a placa de vídeo não tem WebGL2. */
+  fibras2d(ctx, foco, z, tempo, jx0, jy0, jx1, jy1) {
+    const ocultos = this.ocultos, raizZ = Math.sqrt(z);
+    // ---- fibras. As que estão em repouso (quase todas) saem em lotes por cor, num traço só por lote; a troca de
+    // cor ao longo da fibra é feita em três trechos (ponta, meio, ponta). Só as acesas (foco, impulso recente,
+    // leitura ao vivo) são desenhadas uma a uma, com o degradê. Fibra fora da tela não é desenhada.
+    for (const l of this.lotes.values()) l.n = 0;
+    const acesas = this.acesas; acesas.length = 0;
+    const fraca = foco ? .2 : 1;
+    for (const e of this.arestas) {
+      if (e.brilho > 0.002) e.brilho *= 0.965; else e.brilho = 0;
+      const a = e.de, b = e.para;
+      if (ocultos.has(a.tipo) || ocultos.has(b.tipo)) continue;
+      const acesa = foco ? foco.has(e.origem) && foco.has(e.destino) : false;
+      if (e.guia && !acesa) continue;
+      const k = 0.18 * e.sinal, cx = (a.x + b.x) / 2 - (b.y - a.y) * k, cy = (a.y + b.y) / 2 + (b.x - a.x) * k;
+      if ((a.x < jx0 && b.x < jx0 && cx < jx0) || (a.x > jx1 && b.x > jx1 && cx > jx1) || (a.y < jy0 && b.y < jy0 && cy < jy0) || (a.y > jy1 && b.y > jy1 && cy > jy1)) continue;
+      if (acesa || e.ao_vivo || (!foco && e.brilho > 0.04)) { e.cx = cx; e.cy = cy; e.acesa = acesa; acesas.push(e); continue; }
+      const alfa = e.agente ? .2 : .12;
+      if (e.c0 === e.c1) { this.porNoLote(e.c0, alfa, a.x, a.y, cx, cy, b.x, b.y); continue; }
+      // três trechos da mesma curva: 0–1/3 na cor de uma ponta, 1/3–2/3 na mistura, 2/3–1 na cor da outra
+      const q0x = a.x + (cx - a.x) / 3, q0y = a.y + (cy - a.y) / 3, q1x = cx + (b.x - cx) / 3, q1y = cy + (b.y - cy) / 3;
+      const s1x = q0x + (q1x - q0x) / 3, s1y = q0y + (q1y - q0y) / 3;
+      const rax = (s1x + q1x) / 2, ray = (s1y + q1y) / 2, rbx = (q1x + b.x) / 2, rby = (q1y + b.y) / 2;
+      const s2x = (rax + rbx) / 2, s2y = (ray + rby) / 2;
+      this.porNoLote(e.c0, alfa, a.x, a.y, q0x, q0y, s1x, s1y);
+      this.porNoLote(e.cm, alfa, s1x, s1y, rax, ray, s2x, s2y);
+      this.porNoLote(e.c1, alfa, s2x, s2y, rbx, rby, b.x, b.y);
+    }
+    ctx.lineWidth = 1.1 / raizZ;
+    for (const l of this.lotes.values()) {
+      if (!l.n) continue;
+      ctx.globalAlpha = l.alfa * fraca; ctx.strokeStyle = l.cor;
+      const p = l.p;
+      for (let i = 0; i < l.n; i += 6) { ctx.beginPath(); ctx.moveTo(p[i], p[i + 1]); ctx.quadraticCurveTo(p[i + 2], p[i + 3], p[i + 4], p[i + 5]); ctx.stroke(); }
+    }
+    for (const e of acesas) {
+      const basico = e.ao_vivo ? .5 : e.agente ? .2 : .12;
+      ctx.globalAlpha = Math.min(1, foco ? (e.acesa ? .6 : basico * .2) : basico + e.brilho * .45);
+      const gr = ctx.createLinearGradient(e.de.x, e.de.y, e.para.x, e.para.y);
+      gr.addColorStop(0, e.c0); gr.addColorStop(1, e.c1);
+      ctx.strokeStyle = gr;
+      ctx.lineWidth = (e.acesa ? 1.9 : 1.1 + e.brilho * 1.2 + (e.ao_vivo ? .6 : 0)) / raizZ;
+      if (e.ao_vivo) { ctx.setLineDash([6, 6]); ctx.lineDashOffset = -tempo * 40; }
+      ctx.beginPath(); ctx.moveTo(e.de.x, e.de.y); ctx.quadraticCurveTo(e.cx, e.cy, e.para.x, e.para.y); ctx.stroke();
+      if (e.ao_vivo) ctx.setLineDash([]);
+    }
   }
 
   desenhar(agora) {
@@ -436,7 +632,8 @@ export class Cerebro {
     const { x: vx, y: vy, z } = this.v;
     const t = agora / 1000;
     const res = movimentoReduzido ? 0 : 1;
-    const visivel = n => !this.ocultos.has(n.tipo);
+    const ocultos = this.ocultos;
+    const visivel = n => !ocultos.has(n.tipo);
     if (!this.cortex) this.desenharCortex();
     if (!this.fundo) this.desenharFundo();
 
@@ -447,67 +644,96 @@ export class Cerebro {
       this.proximoDisparo = agora + 1600 + Math.random() * 2200;
     }
 
+    const base = () => ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * vx, dpr * vy);
+    // camada de trás (fundo e córtex): só é refeita quando a vista ou o mouse mudam
+    const tras = this.ctxTras, comGl = this.gl && !this.gl.perdido;
+    const fx = (this.mouse.x - innerWidth / 2) * -0.012 * res, fy = (this.mouse.y - innerHeight / 2) * -0.012 * res;
+    const chave = `${vx}|${vy}|${z}|${fx}|${fy}`;
+    if (!comGl || chave !== this.trasChave) {
+      this.trasChave = chave;
+      tras.setTransform(dpr, 0, 0, dpr, 0, 0);
+      tras.clearRect(0, 0, innerWidth, innerHeight);
+      tras.drawImage(this.fundo, fx, fy);
+      tras.setTransform(dpr * z, 0, 0, dpr * z, dpr * vx, dpr * vy);
+      tras.drawImage(this.cortex.canvas, -this.cortex.largura / 2, -this.cortex.altura / 2, this.cortex.largura, this.cortex.altura);
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     ctx.globalAlpha = 1;
-    ctx.drawImage(this.fundo, (this.mouse.x - innerWidth / 2) * -0.012 * res, (this.mouse.y - innerHeight / 2) * -0.012 * res);
-    ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * vx, dpr * vy);
-    ctx.drawImage(this.cortex.canvas, -this.cortex.largura / 2, -this.cortex.altura / 2, this.cortex.largura, this.cortex.altura);
+    base();
     const foco = this.foco();
+    const [jx0, jy0, jx1, jy1] = this.janela(24);
+    const raizZ = Math.sqrt(z);
 
-    // fibras: curvas, com o degradê das cores das pontas
+    // ---- fibras
     ctx.globalCompositeOperation = "lighter";
-    for (const e of this.arestas) {
-      if (!visivel(e.de) || !visivel(e.para)) continue;
-      e.brilho = (e.brilho || 0) * 0.965;
-      const acesa = foco ? foco.has(e.origem) && foco.has(e.destino) : false;
-      const doGuia = e.de.tipo === "guia" || e.para.tipo === "guia";
-      if (doGuia && !acesa) continue;
-      const agente = e.de.tipo === "agente" || e.para.tipo === "agente";
-      const base = e.ao_vivo ? .5 : agente ? .2 : .12;
-      const alfa = foco ? (acesa ? .6 : base * .2) : base + e.brilho * .45;
-      const [, , cx, cy] = this.curva(e, 0);
-      const gr = ctx.createLinearGradient(e.de.x, e.de.y, e.para.x, e.para.y);
-      gr.addColorStop(0, rgba(e.de.cor, alfa)); gr.addColorStop(1, rgba(e.para.cor, alfa));
-      ctx.strokeStyle = gr;
-      ctx.lineWidth = (acesa ? 1.9 : 1.1 + e.brilho * 1.2 + (e.ao_vivo ? .6 : 0)) / Math.sqrt(z);
-      if (e.ao_vivo) { ctx.setLineDash([6, 6]); ctx.lineDashOffset = -t * 40 * res; }
-      ctx.beginPath(); ctx.moveTo(e.de.x, e.de.y); ctx.quadraticCurveTo(cx, cy, e.para.x, e.para.y); ctx.stroke();
-      if (e.ao_vivo) ctx.setLineDash([]);
-    }
-
-    // impulsos correndo pelas fibras, com rastro
-    this.impulsos = this.impulsos.filter(imp => {
-      const k = (agora - imp.ini) / imp.dur;
-      if (k >= 1) { this.chegou(imp); return false; }
-      if (!visivel(imp.de) || !visivel(imp.para)) return false;
-      const ida = imp.de === imp.e.de;
-      for (let i = 0; i < 7; i++) {
-        const q = Math.max(0, k - i * 0.025), [px, py] = this.curva(imp.e, ida ? q : 1 - q);
-        ctx.fillStyle = rgba(i === 0 ? "#ffffff" : imp.cor, i === 0 ? .95 : .5 * (1 - i / 7));
-        ctx.beginPath(); ctx.arc(px, py, (i === 0 ? 2.6 : 2.1 - i * .2) / Math.sqrt(z), 0, 6.28); ctx.fill();
+    const arestas = this.arestas;
+    if (comGl) {
+      // na placa de vídeo, na camada do meio: todas num lote só. Aqui só se decide, fibra a fibra, o brilho, a largura e o tracejado.
+      if (this.geoSuja || this.gl.nFibras !== arestas.length) { this.gl.geometria(arestas); this.geoSuja = false; }
+      const est = this.gl.estado;
+      for (let i = 0, j = 0; i < arestas.length; i++, j += 4) {
+        const e = arestas[i];
+        if (e.brilho > 0.002) e.brilho *= 0.965; else e.brilho = 0;
+        const acesa = foco ? foco.has(e.origem) && foco.has(e.destino) : false;
+        if (ocultos.has(e.de.tipo) || ocultos.has(e.para.tipo) || (e.guia && !acesa)) { est[j] = 0; continue; }
+        const basico = e.ao_vivo ? .5 : e.agente ? .2 : .12;
+        const alfa = foco ? (acesa ? .6 : basico * .2) : basico + e.brilho * .45;
+        const largura = acesa ? 1.9 : 1.1 + e.brilho * 1.2 + (e.ao_vivo ? .6 : 0);
+        est[j] = Math.max(1, Math.min(255, Math.round(alfa * 255)));
+        est[j + 1] = Math.min(255, Math.round(largura / 4 * 255));
+        est[j + 2] = e.ao_vivo ? 255 : 0;
       }
-      const [hx, hy] = this.curva(imp.e, ida ? k : 1 - k);
-      const halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, 13);
-      halo.addColorStop(0, rgba(imp.cor, .5)); halo.addColorStop(1, rgba(imp.cor, 0));
-      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(hx, hy, 13, 0, 6.28); ctx.fill();
-      return true;
-    });
-
-    // halo de cada neurônio (cresce quando ele dispara)
-    for (const n of this.nos.values()) {
-      if (!visivel(n) || n.tipo === "pendente") continue;
-      n.brilho = Math.min(1, n.brilho + 0.03);
-      n.act *= 0.955; n.pot *= 0.985;
-      const apagado = foco && !foco.has(n.id);
-      const raio = n.r * (3.2 + n.act * 4) * (this.sobre === n.id ? 1.3 : 1);
-      const hg = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, raio);
-      hg.addColorStop(0, rgba(n.cor, ((apagado ? .04 : .2) + n.act * .5) * n.brilho));
-      hg.addColorStop(1, rgba(n.cor, 0));
-      ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(n.x, n.y, raio, 0, 6.28); ctx.fill();
+      this.gl.desenhar({ x: vx, y: vy, z, dpr, traco: t * 40 * res });
+    } else {
+      tras.globalCompositeOperation = "lighter";
+      this.fibras2d(tras, foco, z, t * res, jx0, jy0, jx1, jy1);
+      tras.globalCompositeOperation = "source-over";
+      tras.globalAlpha = 1;
     }
 
-    // anéis: onde um agente acabou de mexer
+    // ---- impulsos correndo pelas fibras, com rastro
+    const vivos = [];
+    for (const imp of this.impulsos) {
+      const k = (agora - imp.ini) / imp.dur;
+      if (k >= 1) { this.chegou(imp); continue; }
+      if (!visivel(imp.de) || !visivel(imp.para)) continue;
+      vivos.push(imp);
+      const fib = imp.e, a = fib.de, b = fib.para, ida = imp.de === a;
+      const kc = 0.18 * (fib.sinal || 1), ccx = (a.x + b.x) / 2 - (b.y - a.y) * kc, ccy = (a.y + b.y) / 2 + (b.x - a.x) * kc;
+      let q = ida ? k : 1 - k, u = 1 - q;
+      const hx = u * u * a.x + 2 * u * q * ccx + q * q * b.x, hy = u * u * a.y + 2 * u * q * ccy + q * q * b.y;
+      if (hx < jx0 || hx > jx1 || hy < jy0 || hy > jy1) continue;
+      ctx.fillStyle = imp.cor;
+      for (let i = 6; i >= 1; i--) {
+        q = Math.max(0, k - i * 0.025); if (!ida) q = 1 - q; u = 1 - q;
+        ctx.globalAlpha = .5 * (1 - i / 7);
+        ctx.beginPath(); ctx.arc(u * u * a.x + 2 * u * q * ccx + q * q * b.x, u * u * a.y + 2 * u * q * ccy + q * q * b.y, (2.1 - i * .2) / raizZ, 0, 6.28); ctx.fill();
+      }
+      ctx.globalAlpha = .95; ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.arc(hx, hy, 2.6 / raizZ, 0, 6.28); ctx.fill();
+      ctx.globalAlpha = .5;
+      ctx.drawImage(this.halo(imp.cor), hx - 13, hy - 13, 26, 26);
+    }
+    this.impulsos = vivos;
+
+    // ---- halo de cada neurônio (cresce quando ele dispara)
+    for (const [cor, lista] of this.porCor) {
+      const imagem = this.halo(cor);
+      for (const n of lista) {
+      if (ocultos.has(n.tipo)) continue;
+      n.brilho = Math.min(1, n.brilho + 0.03);
+      if (n.tipo === "pendente") continue;
+      n.act *= 0.955; n.pot *= 0.985;
+      const raio = n.r * (3.2 + n.act * 4) * (this.sobre === n.id ? 1.3 : 1);
+      if (n.x + raio < jx0 || n.x - raio > jx1 || n.y + raio < jy0 || n.y - raio > jy1) continue;
+      const apagado = foco && !foco.has(n.id);
+      ctx.globalAlpha = Math.min(1, ((apagado ? .04 : .2) + n.act * .5) * n.brilho);
+      ctx.drawImage(imagem, n.x - raio, n.y - raio, raio * 2, raio * 2);
+      }
+    }
+
+    // ---- anéis: onde um agente acabou de mexer
     this.aneis = this.aneis.filter(p => agora - p.t0 < 1600);
     for (const p of this.aneis) {
       const k = (agora - p.t0) / 1600;
@@ -521,24 +747,31 @@ export class Cerebro {
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
 
-    // neurônios: corpo e dendritos (pré-desenhados), balançando de leve
+    // ---- neurônios: corpo e dendritos (pré-desenhados), balançando de leve
+    const dz = dpr * z, ex = dpr * vx, ey = dpr * vy;
+    const perto = dz > 0.95; // com zoom, vale o atlas de resolução alta
     for (const n of this.nos.values()) {
-      if (!visivel(n)) continue;
+      if (ocultos.has(n.tipo)) continue;
       const apagado = foco && !foco.has(n.id);
       if (n.tipo === "pendente") {
         // nota citada que ainda não existe: um neurônio fantasma
+        if (n.x < jx0 || n.x > jx1 || n.y < jy0 || n.y > jy1) continue;
         ctx.globalAlpha = (apagado ? .15 : .55) * n.brilho;
         ctx.setLineDash([2.5, 2.5]); ctx.strokeStyle = "#8b95aa"; ctx.lineWidth = 1.2;
         ctx.beginPath(); ctx.arc(n.x, n.y, n.r * 1.4, 0, 6.28); ctx.stroke(); ctx.setLineDash([]);
         continue;
       }
-      ctx.globalAlpha = (apagado ? .22 : 1) * n.brilho;
-      const s = this.neuronio(n), giro = Math.sin(t * .5 + n.fase) * .05 * res;
+      const s = this.neuronio(n, perto);
       const escala = (1 + n.act * .12 + (n.tipo === "agente" ? Math.sin(t * 2.4 + n.fase) * .05 * res : 0)) * (this.sobre === n.id ? 1.18 : 1);
-      ctx.save(); ctx.translate(n.x, n.y); ctx.rotate(giro); ctx.scale(escala, escala);
-      ctx.drawImage(s.canvas, -s.tam / 2, -s.tam / 2, s.tam, s.tam);
-      ctx.restore();
+      const meio = s.tam / 2 * escala;
+      if (n.x + meio < jx0 || n.x - meio > jx1 || n.y + meio < jy0 || n.y - meio > jy1) continue;
+      ctx.globalAlpha = (apagado ? .22 : 1) * n.brilho;
+      // a posição, o balanço e a escala numa conta só (sem save/restore por neurônio)
+      const giro = Math.sin(t * .5 + n.fase) * .05 * res, co = Math.cos(giro) * dz * escala, si = Math.sin(giro) * dz * escala;
+      ctx.setTransform(co, si, -si, co, dz * n.x + ex, dz * n.y + ey);
+      ctx.drawImage(s.canvas, s.x, s.y, s.lado, s.lado, -s.tam / 2, -s.tam / 2, s.tam, s.tam);
       if (n.tipo === "agente") {
+        base();
         const r = n.r * 1.9 + Math.sin(t * 2.4 + n.fase) * 2 * res;
         ctx.strokeStyle = rgba(n.cor, .55 + Math.sin(t * 2.4 + n.fase) * .3 * res); ctx.lineWidth = 1.6;
         ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 6.28); ctx.stroke();
@@ -549,29 +782,50 @@ export class Cerebro {
         }
       }
     }
+    base();
+    this.construirPerto();
 
-    // rótulos: os mais importantes primeiro; quem colide com um rótulo já desenhado fica para quando aproximar
+    // ---- rótulos: só os que cabem na tela; os mais importantes primeiro, e quem colide com um já desenhado
+    // fica para quando aproximar
     ctx.textAlign = "center"; ctx.textBaseline = "top";
-    const peso = n => (n.id === this.sobre ? 1e6 : 0) + (n.tipo === "agente" ? 1e5 : 0) + (foco?.has(n.id) ? 1e4 : 0) + n.grau;
-    const ocupados = [];
-    for (const n of [...this.nos.values()].sort((a, b) => peso(b) - peso(a))) {
-      if (!visivel(n)) continue;
-      const emFoco = foco?.has(n.id);
+    const candidatos = this.candidatos; candidatos.length = 0;
+    for (const n of this.nos.values()) {
+      if (ocultos.has(n.tipo)) continue;
+      const emFoco = foco ? foco.has(n.id) : false;
       const mostra = n.tipo === "agente" || emFoco || z > 1.15 || n.grau >= 5 || n.tipo === "sistema" || n.tipo === "padrao";
       if (!mostra || (foco && !emFoco)) continue;
+      if (n.x < jx0 - 120 || n.x > jx1 + 120 || n.y < jy0 - 40 || n.y > jy1) continue;
+      n.pesoRotulo = (n.id === this.sobre ? 1e6 : 0) + (n.tipo === "agente" ? 1e5 : 0) + (emFoco ? 1e4 : 0) + n.grau;
+      n.emFoco = emFoco;
+      candidatos.push(n);
+    }
+    candidatos.sort((a, b) => b.pesoRotulo - a.pesoRotulo);
+    const ocupados = this.ocupados; ocupados.length = 0;
+    let fonteAtual = "";
+    for (const n of candidatos) {
+      const emFoco = n.emFoco, forte = n.tipo === "agente" || emFoco;
       const texto = n.tipo === "agente" ? `${n.titulo} · ${nomeModelo(n.modelo)}`
         : ["chamado", "tabela", "pendente"].includes(n.tipo) ? n.id : encurtarRotulo(n.titulo);
-      const tam = (n.tipo === "agente" ? 12.5 : emFoco ? 12 : 11) / Math.sqrt(z);
-      ctx.font = `${n.tipo === "agente" || emFoco ? 650 : 500} ${tam}px "Segoe UI Variable Text", "Segoe UI", sans-serif`;
-      const y = n.y + n.r * 2.1, larg = ctx.measureText(texto).width, folga = 3 / z;
-      const caixa = [n.x - larg / 2 - folga, y - folga, n.x + larg / 2 + folga, y + tam * 1.25 + folga];
-      if (n.id !== this.sobre && ocupados.some(o => caixa[0] < o[2] && caixa[2] > o[0] && caixa[1] < o[3] && caixa[3] > o[1])) continue;
-      ocupados.push(caixa);
+      const tam = (n.tipo === "agente" ? 12.5 : emFoco ? 12 : 11) / raizZ;
+      // a largura do texto é medida uma vez só (numa letra de 100 px) e guardada no neurônio
+      if (n.rotTexto !== texto) { n.rotTexto = texto; n.larg5 = n.larg6 = 0; }
+      const campo = forte ? "larg6" : "larg5";
+      if (!n[campo]) { ctx.font = `${forte ? 650 : 500} 100px "Segoe UI Variable Text", "Segoe UI", sans-serif`; fonteAtual = ""; n[campo] = ctx.measureText(texto).width / 100; }
+      const y = n.y + n.r * 2.1, larg = n[campo] * tam, folga = 3 / z;
+      const x0 = n.x - larg / 2 - folga, y0 = y - folga, x1 = n.x + larg / 2 + folga, y1 = y + tam * 1.25 + folga;
+      if (n.id !== this.sobre) {
+        let bate = false;
+        for (let i = 0; i < ocupados.length; i += 4) if (x0 < ocupados[i + 2] && x1 > ocupados[i] && y0 < ocupados[i + 3] && y1 > ocupados[i + 1]) { bate = true; break; }
+        if (bate) continue;
+      }
+      ocupados.push(x0, y0, x1, y1);
+      const fonte = `${forte ? 650 : 500} ${tam}px "Segoe UI Variable Text", "Segoe UI", sans-serif`;
+      if (fonte !== fonteAtual) { ctx.font = fonte; fonteAtual = fonte; }
       ctx.globalAlpha = n.brilho;
-      ctx.lineWidth = 3.5 / Math.sqrt(z);
+      ctx.lineWidth = 3.5 / raizZ;
       ctx.strokeStyle = "rgba(4,6,10,.92)";
       ctx.strokeText(texto, n.x, y);
-      ctx.fillStyle = emFoco || n.tipo === "agente" ? "#ffffff" : "#c9d1e2";
+      ctx.fillStyle = forte ? "#ffffff" : "#c9d1e2";
       ctx.fillText(texto, n.x, y);
     }
     ctx.globalAlpha = 1;
@@ -611,6 +865,7 @@ export class Cerebro {
         else if (gesto.n.tipo !== "agente") {
           gesto.n.x = (e.clientX - this.v.x) / this.v.z;
           gesto.n.y = (e.clientY - this.v.y) / this.v.z;
+          this.geoSuja = true;
           this.calor = Math.max(this.calor, 0.25);
         }
         return;
@@ -628,7 +883,7 @@ export class Cerebro {
         if (!gesto.moveu) {
           this.selecionado = gesto.n.id;
           gesto.n.refr = 0;
-          this.disparar(gesto.n, 1.3);
+          this.disparar(gesto.n, 1.3, null, 400);
           if (gesto.n.tipo === "agente") this.aoAgente(gesto.n.id.slice("sessao:".length));
           else this.aoAbrir(gesto.n.id);
         }
