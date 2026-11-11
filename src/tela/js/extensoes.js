@@ -95,16 +95,52 @@ const MAPA_MONARCH = [
 let regrasTm = prepararRegras(padraoTm(false));
 const tokensTm = new Map(); // pilha de escopos → nome do token no Monaco
 const regrasMonacoTm = []; // as regras desses tokens no tema do Monaco
+const tokensComRegra = new Set();
+
+/** A cor como o Monaco aceita nas regras: 6 dígitos ("#fff" e "#ffffff80" derrubavam o tema inteiro). */
+const hex6 = c => {
+  const h = String(c).replace("#", "");
+  return (h.length <= 4 ? h.slice(0, 3).split("").map(x => x + x).join("") : h.slice(0, 6)).toLowerCase();
+};
+const estiloFonte = f => String(f || "").trim().replace(/\s+/g, " ");
+// o nome do token diz a cor e o estilo: o mesmo nome vale para qualquer pilha de escopos com esse resultado
+const nomeToken = (cor, fonte) => `tm.${cor ? hex6(cor) : "x"}.${estiloFonte(fonte).replace(/ /g, "-") || "n"}`;
+const regraToken = (cor, fonte) => ({ token: nomeToken(cor, fonte), ...(cor ? { foreground: hex6(cor) } : {}), fontStyle: estiloFonte(fonte) });
+
+/**
+ * Todas as combinações de cor e estilo que o tema pode dar, já no tema do Monaco. Antes elas entravam aos poucos,
+ * a cada cor nova encontrada, e cada entrada redefinia o tema: o Monaco recoloria todos os arquivos de novo
+ * (o código piscava e ficava com cores trocadas no meio do caminho).
+ */
+function prepararTokens() {
+  tokensTm.clear();
+  regrasMonacoTm.length = 0;
+  tokensComRegra.clear();
+  const cores = new Set([null]), fontes = new Set([null]);
+  for (const r of regrasTm) {
+    if (corValida(r.settings.foreground)) cores.add(hex6(r.settings.foreground));
+    if (typeof r.settings.fontStyle === "string") fontes.add(estiloFonte(r.settings.fontStyle));
+  }
+  for (const cor of cores) for (const fonte of fontes) {
+    if (cor === null && fonte === null) continue;
+    const regra = regraToken(cor, fonte);
+    if (tokensComRegra.has(regra.token)) continue;
+    tokensComRegra.add(regra.token);
+    regrasMonacoTm.push(regra);
+  }
+}
 
 function tokenDe(escopos) {
   const chave = escopos.join(" ");
   let t = tokensTm.get(chave);
   if (t) return t;
   const { cor, fonte } = estiloDe(regrasTm, escopos);
-  t = cor || fonte ? `tm.${(cor || "x").replace("#", "").toLowerCase()}.${(fonte || "n").replace(/\s+/g, "-")}` : "tm.padrao";
+  t = cor || fonte ? nomeToken(cor, fonte) : "tm.padrao";
   tokensTm.set(chave, t);
-  if (t !== "tm.padrao" && !regrasMonacoTm.some(r => r.token === t)) {
-    regrasMonacoTm.push({ token: t, ...(cor ? { foreground: cor.replace("#", "").slice(0, 6) } : {}), ...(fonte ? { fontStyle: fonte } : {}) });
+  if (t !== "tm.padrao" && !tokensComRegra.has(t)) {
+    // não deveria acontecer (prepararTokens cobre todas): fica como rede de segurança
+    tokensComRegra.add(t);
+    regrasMonacoTm.push(regraToken(cor, fonte));
     temaSujo = true;
   }
   return t;
@@ -117,30 +153,39 @@ export function definirTemaEditor(monaco, { claro = false, contraste = false, co
   const t = ext.temaCores;
   const tipo = t ? t.tipo : contraste ? "contraste" : claro ? "claro" : "escuro";
   regrasTm = prepararRegras(t ? t.tokenColors : padraoTm(tipo === "claro"));
-  tokensTm.clear();
-  regrasMonacoTm.length = 0;
+  prepararTokens();
   const regras = [];
   if (t) {
     for (const [token, ...escopos] of MAPA_MONARCH) {
       let s = { cor: null, fonte: null };
       for (const e of escopos) { const x = estiloDe(regrasTm, [e]); if (x.cor || x.fonte) { s = x; break; } }
-      if (s.cor || s.fonte) regras.push({ token, ...(s.cor ? { foreground: s.cor.replace("#", "").slice(0, 6) } : {}), ...(s.fonte ? { fontStyle: s.fonte } : {}) });
+      if (s.cor || s.fonte) regras.push({ token, ...(s.cor ? { foreground: hex6(s.cor) } : {}), ...(s.fonte ? { fontStyle: estiloFonte(s.fonte) } : {}) });
     }
   }
   const colors = {};
   for (const [k, v] of Object.entries(t ? t.colors || {} : colorsEngram)) if (corValida(v)) colors[k] = v;
   base = { base: tipo === "contraste" ? "hc-black" : tipo === "claro" ? "vs" : "vs-dark", colors, rules: regras };
+  // trocar o tema já faz o Monaco recolorir os arquivos abertos, com os nomes de token do tema novo
   aplicarTema(monaco);
-  // o realce TextMate recalcula as cores com o tema novo
-  for (const d of provedores.values()) d.refazer();
 }
 
 function aplicarTema(monaco) {
   if (!base) return;
-  try { monaco.editor.defineTheme("engram", { base: base.base, inherit: true, rules: [...base.rules, ...regrasMonacoTm], colors: base.colors }); }
-  catch { monaco.editor.defineTheme("engram", { base: base.base, inherit: true, rules: [...base.rules, ...regrasMonacoTm], colors: {} }); }
-  monaco.editor.setTheme("engram");
   temaSujo = false;
+  const tema = colors => ({ base: base.base, inherit: true, rules: [...base.rules, ...regrasMonacoTm], colors });
+  try { monaco.editor.defineTheme("engram", tema(base.colors)); }
+  catch {
+    try { monaco.editor.defineTheme("engram", tema({})); } // uma cor da interface que o Monaco não aceita
+    catch (e) { console.warn("tema do editor:", e); monaco.editor.defineTheme("engram", { base: base.base, inherit: true, rules: base.rules, colors: {} }); }
+  }
+  monaco.editor.setTheme("engram");
+}
+
+let temaAgendado = false;
+function agendarTema(monaco) {
+  if (temaAgendado) return;
+  temaAgendado = true;
+  setTimeout(() => { temaAgendado = false; if (temaSujo) aplicarTema(monaco); }, 300);
 }
 
 /** As cores do terminal pelo tema do VS Code (null = o terminal segue o tema do Engram). */
@@ -225,7 +270,6 @@ export function iconeDoTema(nome, { pasta = false, aberta = false, linguagem = n
 
 let tm = null; // { vt, registro }
 const gramaticas = new Map(); // escopo → { url, arquivo, linguagem, injetarEm }
-const provedores = new Map(); // linguagem → { refazer() }
 let descartaveis = []; // snippets e linguagens registrados (para refazer quando as extensões mudam)
 
 function carregarScript(src) {
@@ -264,37 +308,34 @@ class EstadoTm {
   equals(o) { return o instanceof EstadoTm && (o.pilha === this.pilha || !!o.pilha?.equals?.(this.pilha)); }
 }
 
+/**
+ * O realce do VS Code para uma linguagem. Vai como fábrica: o Monaco só a chama quando aparece um arquivo dessa
+ * linguagem, e ela toma o lugar do realce próprio dele (Monarch, que também é uma fábrica) de vez. Antes era
+ * setTokensProvider, e o Monarch, terminando de carregar depois, passava por cima: daí os timers de 700 ms e
+ * 2,5 s e as cores que às vezes ficavam erradas.
+ */
 function ligarGramatica(monaco, linguagem, escopo) {
-  let gramatica = null, disp = null;
-  const instalar = () => {
-    disp?.dispose();
-    disp = monaco.languages.setTokensProvider(linguagem, {
-      getInitialState: () => new EstadoTm(tm.vt.INITIAL),
-      tokenize: (linha, estado) => {
-        const r = gramatica.tokenizeLine(linha, estado.pilha, 500);
-        const tokens = r.tokens.map(t => ({ startIndex: t.startIndex, scopes: tokenDe(t.scopes) }));
-        if (temaSujo) queueMicrotask(() => temaSujo && aplicarTema(monaco));
-        return { endState: new EstadoTm(r.ruleStack), tokens };
-      },
-    });
-  };
-  const ligar = async () => {
-    try {
-      await prepararTextmate();
-      gramatica = await tm.registro.loadGrammar(escopo);
-      if (!gramatica) return;
-      instalar();
-      // o Monaco carrega o realce próprio dele (Monarch) sem esperar: se ele terminar depois, passa por cima.
-      // Reinstalar logo em seguida garante que o do VS Code fique.
-      setTimeout(instalar, 700);
-      setTimeout(instalar, 2500);
-    } catch (e) { console.warn(`realce de ${linguagem}:`, e); }
-  };
-  provedores.set(linguagem, { refazer: () => gramatica && instalar(), dispose: () => disp?.dispose() });
-  // só carrega quando aparecer um arquivo dessa linguagem
-  const d = monaco.languages.onLanguage(linguagem, ligar);
-  if (monaco.editor.getModels().some(m => m.getLanguageId() === linguagem)) ligar();
-  return d;
+  return monaco.languages.registerTokensProviderFactory(linguagem, {
+    create: async () => {
+      try {
+        await prepararTextmate();
+        const gramatica = await tm.registro.loadGrammar(escopo);
+        if (!gramatica) return null;
+        return {
+          getInitialState: () => new EstadoTm(tm.vt.INITIAL),
+          tokenize: (linha, estado) => {
+            const r = gramatica.tokenizeLine(linha, estado.pilha, 500);
+            const tokens = r.tokens.map(t => ({ startIndex: t.startIndex, scopes: tokenDe(t.scopes) }));
+            if (temaSujo) agendarTema(monaco);
+            return { endState: new EstadoTm(r.ruleStack), tokens };
+          },
+        };
+      } catch (e) {
+        console.warn(`realce de ${linguagem}:`, e);
+        return null;
+      }
+    },
+  });
 }
 
 function regex(x) {
@@ -330,14 +371,15 @@ function lerJsonc(texto) {
 
 /** Liga (ou religa) o que as extensões ativas oferecem ao editor: linguagens, realce e snippets. */
 export async function ligarContribuicoes(monaco) {
-  for (const d of descartaveis) try { d.dispose(); } catch { /* segue */ }
-  descartaveis = [];
-  for (const p of provedores.values()) p.dispose();
-  provedores.clear();
-  gramaticas.clear();
-  ext.linguagens.clear();
   let c;
   try { c = await api("/api/extensoes/contribuicoes"); } catch (e) { return erro(e); }
+  // resposta incompleta (servidor antigo, erro no meio): segue com o que veio em vez de quebrar ("not iterable")
+  c = { ...c, gramaticas: c?.gramaticas || [], linguagens: c?.linguagens || [], snippets: c?.snippets || [] };
+  // só desfaz o que havia depois de ter o novo: o realce não fica sem cor enquanto a resposta não chega
+  for (const d of descartaveis) try { d.dispose(); } catch { /* segue */ }
+  descartaveis = [];
+  gramaticas.clear();
+  ext.linguagens.clear();
   ext.contrib = c;
   const conhecidas = new Set(monaco.languages.getLanguages().map(l => l.id));
   for (const g of c.gramaticas) gramaticas.set(g.escopo, g);
@@ -355,6 +397,13 @@ export async function ligarContribuicoes(monaco) {
     }
   }
   for (const [linguagem, escopo] of comGramatica) descartaveis.push(ligarGramatica(monaco, linguagem, escopo));
+  // o modo JSON do Monaco registra o realce dele direto, e isso vale mais que qualquer fábrica: com a gramática do
+  // VS Code, só o realce dele sai (completar, erros e dobras continuam)
+  const json = monaco.json?.jsonDefaults;
+  if (json?.setModeConfiguration && json.modeConfiguration) {
+    const proprio = !comGramatica.has("json");
+    if ((json.modeConfiguration.tokens !== false) !== proprio) json.setModeConfiguration({ ...json.modeConfiguration, tokens: proprio });
+  }
   // snippets: um provedor de sugestões por linguagem
   const porLinguagem = new Map();
   await Promise.all(c.snippets.map(async s => {
