@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, protocol, net, shell, Tray, Menu, nativeImage, safeStorage, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, shell, Tray, Menu, nativeImage, safeStorage, dialog, Notification } = require('electron');
 
 // Cópia de teste com dados próprios (não mexe no Engram de todo dia)
 if (process.env.ENGRAM_DADOS) app.setPath('userData', path.resolve(process.env.ENGRAM_DADOS));
@@ -28,6 +28,7 @@ const { Extensoes } = require('./extensoes');
 const { Previa } = require('./previa');
 const { Linguagens } = require('./linguagens');
 const { Trabalho } = require('./trabalho');
+const { Automacoes } = require('./automacoes');
 
 const TELA = path.resolve(__dirname, '..', 'tela');
 const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json', '.wasm': 'application/wasm', '.woff': 'font/woff', '.otf': 'font/otf' };
@@ -49,6 +50,21 @@ let nucleo = null;
 
 function avisar(msg) {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('aovivo', msg);
+}
+
+// Aviso do Windows (das automações). Guardados até sumirem: sem referência, o clique pode se perder.
+const notificacoes = new Set();
+function notificar({ titulo, texto, automacao }) {
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: titulo, body: String(texto || '').slice(0, 240), icon: path.join(TELA, 'marca', 'engram.png') });
+    notificacoes.add(n);
+    const soltar = () => notificacoes.delete(n);
+    n.on('click', () => { soltar(); mostrar(); setTimeout(() => avisar({ tipo: 'automacao', acao: 'focar', id: automacao }), 300); });
+    n.on('close', soltar);
+    n.show();
+    setTimeout(soltar, 10 * 60_000);
+  } catch { /* sem aviso do sistema, o cartão continua mostrando */ }
 }
 
 async function iniciarNucleo() {
@@ -110,6 +126,10 @@ async function iniciarNucleo() {
   setInterval(() => sincronizar(), Math.max(1, cfg.cerebro.sincronizar_min) * 60_000);
   fonte.observar(() => sincronizar());
   setInterval(() => { try { janelas.vigiar(); } catch { /* segue */ } }, 700);
+  // o relógio das automações; a primeira volta espera o time voltar do motor (as atrasadas vão para ele)
+  const automacoes = new Automacoes({ db, janelas, avisar, notificar });
+  const vigiarAutomacoes = () => { try { automacoes.vigiar(); } catch (e) { config.registrar(`automações: ${e.message}`); } };
+  setTimeout(() => { vigiarAutomacoes(); setInterval(vigiarAutomacoes, 15_000); }, 30_000);
 
   // Reiniciar o app não derruba os agentes (estão no motor): na volta, ele reencontra e reabre o time.
   const reiniciar = () => setTimeout(() => { saindo = true; app.relaunch(); app.exit(0); }, 600);
@@ -127,7 +147,7 @@ async function iniciarNucleo() {
     try { janela.setTitleBarOverlay({ color: t.fundo, symbolColor: t.simbolos, height: 40 }); } catch { /* sem barra */ }
   };
   definirTema(cfg.tema);
-  const rotas = criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, abrirTrabalho: sessao => abrirJanelaTrabalho(sessao, trabalho) });
+  const rotas = criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, abrirTrabalho: sessao => abrirJanelaTrabalho(sessao, trabalho) });
   return { cfg, janelas, rotas, extensoes, arquivos: new Arquivos(c.arquivos) };
 }
 

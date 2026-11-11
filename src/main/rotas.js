@@ -6,7 +6,7 @@ class ErroRota extends Error {
   constructor(status, mensagem) { super(mensagem); this.status = status; }
 }
 
-function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, abrirTrabalho }) {
+function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, abrirTrabalho }) {
   const importador = require('./importar');
   const rotas = [];
   const rota = (metodo, padrao, fn) => {
@@ -38,8 +38,20 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
       janelas: [...abertas].map(id => janelas.info(id)),
       conexoes: cerebro.conexoes().filter(c => abertas.has(c.a) && abertas.has(c.b)),
       setores: cerebro.setores(),
+      automacoes: automacoes.lista(),
+      postits: automacoes.postits(),
     };
   });
+  // automações do palco (cartão com orientação e horário, ligado a um agente) e post-its
+  const comErro = fn => (...a) => { try { return fn(...a); } catch (e) { throw e instanceof ErroRota ? e : new ErroRota(400, e.message); } };
+  rota('POST', '/api/automacoes', comErro((_, b) => automacoes.criar(b)));
+  rota('PUT', '/api/automacoes/:id', comErro((p, b) => automacoes.editar(p.id, b)));
+  rota('POST', '/api/automacoes/:id/remover', p => automacoes.remover(p.id));
+  rota('POST', '/api/automacoes/:id/rodar', comErro(p => automacoes.rodar(p.id, 'botão')));
+  rota('GET', '/api/automacoes/:id/rodadas', p => automacoes.rodadas(p.id, 30));
+  rota('POST', '/api/postits', comErro((_, b) => automacoes.postitSalvar(b)));
+  rota('PUT', '/api/postits/:id', comErro((p, b) => automacoes.postitSalvar(b, p.id)));
+  rota('POST', '/api/postits/:id/remover', p => automacoes.postitRemover(p.id));
   // setores do palco: áreas com nome, cor e instrução; o centro do cartão dentro = faz parte
   const setorValido = (b, atual = {}) => {
     const nome = String(b.nome ?? atual.nome ?? '').trim().slice(0, 24);

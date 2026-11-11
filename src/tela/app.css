@@ -219,7 +219,7 @@ mark { background: rgb(var(--acento1) / .3); color: var(--texto-forte); border-r
 .vista.oculta { opacity: 0; transform: scale(.96); filter: blur(8px); pointer-events: none; }
 
 /* ------------------------------------------------------------------ palco */
-#palco { cursor: default; overflow: hidden; }
+#palco { cursor: default; overflow: clip; } /* clip, não hidden: um focus() num cartão meio fora da tela rolava a vista inteira */
 #palco.arrastando { cursor: grabbing; }
 .grade {
   position: absolute; inset: 0; pointer-events: none;

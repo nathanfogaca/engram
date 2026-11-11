@@ -383,12 +383,20 @@ function tratar(m) {
   } else if (m.tipo === "setor") {
     if (m.acao === "salvo") palco.setores.receber(m.setor);
     else if (m.acao === "removido") palco.setores.removerLocal(m.id);
+  } else if (m.tipo === "automacao") {
+    if (m.acao === "removida") palco.automacoes.removerLocal(m.id);
+    else if (m.acao === "focar") { trocarVista("palco"); palco.automacoes.focar(m.id); }
+    else if (m.automacao) palco.automacoes.receber(m.automacao, { devolveu: m.devolveu || null });
+  } else if (m.tipo === "postit") {
+    if (m.acao === "removido") palco.automacoes.removerPostitLocal(m.id);
+    else if (m.postit) palco.automacoes.receberPostit(m.postit);
   } else if (m.tipo === "mensagem") {
     palco.mensagem(m.de, m.para, m.fase);
     if (m.fase === "enviada") {
-      const cor = palco.cartoes.get(m.de)?.cor || "#8b7bff";
-      avisar({ rota: `${nome(m.de)} → ${nome(m.para)}`, texto: encurtar(m.texto || "", 110), cor });
-      cerebro.cometa(`sessao:${m.de}`, `sessao:${m.para}`, cor);
+      const auto = String(m.de).startsWith("auto:") ? palco.automacoes.lista.get(m.de.slice(5)) : null;
+      const cor = auto ? "#ffc857" : palco.cartoes.get(m.de)?.cor || "#8b7bff";
+      avisar({ rota: `${auto ? `⏰ ${auto.nome}` : nome(m.de)} → ${nome(m.para)}`, texto: encurtar(m.texto || "", 110), cor });
+      if (!auto) cerebro.cometa(`sessao:${m.de}`, `sessao:${m.para}`, cor);
     }
   } else if (m.tipo === "cerebro") {
     agendarGrafo();
@@ -477,7 +485,7 @@ async function iniciar() {
     const noEditor = foco?.closest?.(".monaco-editor"); // o editor da vista Código tem os atalhos dele (Ctrl+K…)
     const digitando = foco?.matches?.("input, textarea, select") || noTerminal || noEditor || foco?.isContentEditable;
     if (app.vista === "codigo" && !document.querySelector("dialog[open]") && codigo.tecla(ev)) return;
-    if (app.vista === "palco" && ev.key === "Escape" && !digitando && palco.setores.escape()) { ev.preventDefault(); return; }
+    if (app.vista === "palco" && ev.key === "Escape" && !digitando && (palco.setores.escape() || palco.automacoes.escape())) { ev.preventDefault(); return; }
     if ((ev.ctrlKey && ev.key.toLowerCase() === "k" && !noTerminal && !noEditor) || (ev.key === "/" && !digitando)) {
       ev.preventDefault();
       $("#busca").focus();
@@ -490,6 +498,10 @@ async function iniciar() {
       trocarVista({ 1: "palco", 2: "cerebro", 3: "codigo", 4: "fluxos" }[ev.key]);
     } else if (!digitando && !ev.ctrlKey && !ev.altKey && !ev.metaKey && app.vista === "palco" && ev.key.toLowerCase() === "s" && !document.querySelector("dialog[open]")) {
       palco.setores.alternarModo(); // S: desenhar um setor (de novo: sai do modo)
+    } else if (!digitando && !ev.ctrlKey && !ev.altKey && !ev.metaKey && app.vista === "palco" && ["a", "n"].includes(ev.key.toLowerCase()) && !document.querySelector("dialog[open]")) {
+      ev.preventDefault();
+      if (ev.key.toLowerCase() === "a") palco.automacoes.nova(); // A: automação nova
+      else palco.automacoes.novoPostit(); // N: post-it novo
     }
   });
   window.addEventListener("resize", moverPilula);

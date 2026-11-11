@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="fluxos.css">
 <link rel="stylesheet" href="previa.css">
 <link rel="stylesheet" href="setores.css">
+<link rel="stylesheet" href="automacoes.css">
 </head>
 <body>
 <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -94,9 +95,16 @@
   </div>
 
   <div class="hud">
-    <span class="hud-dica" id="hud-dica">Arraste o fundo para mover · roda do mouse aproxima · ⤢ no cartão abre o leitor grande · Shift + arrastar desenha um setor</span>
+    <span class="hud-dica" id="hud-dica">Arraste o fundo para mover · roda do mouse aproxima · ⤢ no cartão abre o leitor grande · Ferramentas: setor (S), automação (A), post-it (N)</span>
     <div class="hud-zoom">
-      <button class="btn-setor" id="btn-setor" title="Desenhar um setor (S) · ou Shift + arrastar no fundo · ou Ctrl + clique nos cartões"><span class="ico"></span>Setor<kbd>S</kbd></button>
+      <div class="ferramentas" id="ferramentas">
+        <button class="btn-ferramentas" id="btn-ferramentas" title="Ferramentas do palco" aria-haspopup="menu" aria-expanded="false"><span class="ico-ferr">✦</span>Ferramentas<span class="seta">▴</span></button>
+        <div class="ferramentas-menu" id="ferramentas-menu" role="menu" hidden>
+          <button class="ferr-item" id="btn-setor" role="menuitem" title="Desenhar um setor · ou Shift + arrastar no fundo · ou Ctrl + clique nos cartões"><span class="ferr-ico ferr-ico-setor"></span><span class="ferr-txt"><b>Setor</b><small>Área com nome e instrução para um grupo de agentes</small></span><kbd>S</kbd></button>
+          <button class="ferr-item" id="btn-automacao" role="menuitem"><span class="ferr-ico"><span class="relogio"></span></span><span class="ferr-txt"><b>Automação</b><small>Orientação com horário, ligada a um agente</small></span><kbd>A</kbd></button>
+          <button class="ferr-item" id="btn-postit" role="menuitem"><span class="ferr-ico ferr-ico-postit"></span><span class="ferr-txt"><b>Post-it</b><small>Nota solta no palco; pode virar automação</small></span><kbd>N</kbd></button>
+        </div>
+      </div>
       <button class="btn-icone" id="zoom-menos" title="Afastar">−</button>
       <button class="hud-pct" id="zoom-pct" title="Voltar para 100%">100%</button>
       <button class="btn-icone" id="zoom-mais" title="Aproximar">+</button>

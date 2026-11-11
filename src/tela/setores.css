@@ -64,16 +64,6 @@
 @keyframes chip-setor { from { transform: scale(.4); opacity: 0; } }
 .cartao.selecionado { box-shadow: 0 0 0 2px rgb(var(--acento2)), 0 0 70px -4px rgb(var(--acento2) / .6), 0 28px 70px rgba(0, 0, 0, .6); }
 
-/* botão Setor na barra do palco */
-.btn-setor {
-  display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; margin-right: 4px; border-radius: 10px; cursor: pointer;
-  border: 1px solid var(--borda); background: rgb(var(--tinta) / .05); color: var(--texto); font-weight: 600; transition: background .2s, box-shadow .3s, border-color .3s;
-}
-.btn-setor:hover { background: rgb(var(--tinta) / .1); }
-.btn-setor .ico { width: 14px; height: 11px; border: 1.5px dashed currentColor; border-radius: 4px; }
-.btn-setor kbd { font: 10.5px var(--mono); padding: 0 5px; border-radius: 6px; border: 1px solid var(--borda-forte); color: var(--discreto); }
-.btn-setor.ligado { color: var(--texto-forte); border-color: rgb(var(--acento2) / .7); background: rgb(var(--acento2) / .2); box-shadow: 0 0 22px rgb(var(--acento2) / .45); }
-
 .setor-dica {
   position: absolute; left: 50%; top: 84px; z-index: 7; transform: translate(-50%, -10px); opacity: 0; pointer-events: none;
   transition: opacity .3s, transform .3s var(--mola); padding: 8px 16px; border-radius: 12px; font-size: 13px;

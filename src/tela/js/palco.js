@@ -8,6 +8,7 @@ import {
 } from "./util.js";
 import { Conversa } from "./conversa.js";
 import { Setores } from "./setores.js";
+import { Automacoes } from "./automacoes.js";
 
 const TAM = { w: 700, h: 470 };
 const ROTULO = {
@@ -39,6 +40,7 @@ export class Palco {
     this.aoLer = aoLer;
     this.instalar();
     this.setores = new Setores(this);
+    this.automacoes = new Automacoes(this);
     this.aplicar();
     this.atualizarVazio();
   }
@@ -93,7 +95,7 @@ export class Palco {
   }
 
   roda(e) {
-    if (e.target.closest(".term, .conv-rolo")) return; // a roda dentro do cartão rola o conteúdo
+    if (e.target.closest(".term, .conv-rolo, .auto-painel, .ferramentas-menu")) return; // a roda dentro do cartão (ou do painel) rola o conteúdo
     e.preventDefault();
     if (!e.ctrlKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
       this.v.x -= e.deltaX;
@@ -119,7 +121,7 @@ export class Palco {
   }
 
   enquadrar(animado = true) {
-    const lista = [...this.cartoes.values(), ...(this.setores?.caixas() || [])];
+    const lista = [...this.cartoes.values(), ...(this.setores?.caixas() || []), ...(this.automacoes?.caixas() || [])];
     if (!lista.length) return;
     const x1 = Math.min(...lista.map(c => c.x)), y1 = Math.min(...lista.map(c => c.y));
     const x2 = Math.max(...lista.map(c => c.x + c.w)), y2 = Math.max(...lista.map(c => c.y + c.h));
@@ -175,7 +177,7 @@ export class Palco {
   // ---------------------------------------------------------------- gestos
 
   apertar(e) {
-    const fundo = !e.target.closest(".cartao, .lembranca, .hud, .hero, .fio, .setor-etiqueta, .setor-canto, .setor-pop, .setor-agrupar");
+    const fundo = !e.target.closest(".cartao, .lembranca, .hud, .hero, .fio, .setor-etiqueta, .setor-canto, .setor-pop, .setor-agrupar, .auto-cartao, .postit, .auto-painel");
     if (e.button === 0 && fundo) this.setores.limparSelecao();
     // setor: no modo Setor (botão ou S) ou com Shift; sem isso, arrastar o fundo continua movendo o palco
     if (e.button === 0 && fundo && (this.setores.modo || e.shiftKey)) {
@@ -242,12 +244,13 @@ export class Palco {
 
   // ---------------------------------------------------------------- cartões
 
-  carregar({ janelas, conexoes, setores }) {
+  carregar({ janelas, conexoes, setores, automacoes, postits }) {
     janelas.forEach((info, i) => {
       const c = this.adicionar(info);
       if (c) c.el.style.animationDelay = `${i * 90}ms`;
     });
     this.setores.carregar(setores);
+    this.automacoes.carregar(automacoes, postits);
     setTimeout(() => {
       for (const { a, b, revisa } of conexoes) { this.ligar(a, b, { nascendo: true }); if (revisa) this.marcarRevisao(a, b, revisa); }
     }, janelas.length * 90 + 350);
@@ -509,6 +512,7 @@ export class Palco {
     if (!c) return;
     for (const f of [...this.fios.values()]) if (f.a === id || f.b === id) this.desligarLocal(f.a, f.b);
     this.cartoes.delete(id);
+    this.automacoes.redesenhar(id); // a linha da automação some junto (volta se o agente for retomado)
     this.esconderBolha(c);
     this.setores.selecao.delete(id);
     this.setores.atualizarMembros(false);
@@ -637,6 +641,7 @@ export class Palco {
     for (const p of [...this.pendentes.values()]) {
       if ((p.a === id || p.b === id) && this.cartoes.has(p.a) && this.cartoes.has(p.b)) this.ligar(p.a, p.b, { nascendo: true });
     }
+    this.automacoes?.redesenhar(id);
   }
 
   desligarLocal(a, b) {
@@ -698,6 +703,7 @@ export class Palco {
 
   redesenharFios(id) {
     for (const f of this.fios.values()) if (!id || f.a === id || f.b === id) this.desenharFio(f);
+    this.automacoes?.redesenhar(id);
   }
 
   pontoPorta(c, lado) {
@@ -785,6 +791,7 @@ export class Palco {
   // ---------------------------------------------------------------- mensagens e pensamentos
 
   mensagem(de, para, fase) {
+    if (String(de).startsWith("auto:")) this.automacoes.mensagem(de, para, fase); // a orientação de uma automação
     const D = this.cartoes.get(para);
     if (!D) return;
     if (fase === "enviada") {

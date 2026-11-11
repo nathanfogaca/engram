@@ -718,6 +718,8 @@ class Janelas {
     }
     const meu = this.cerebro.setorDe(id);
     if (meu?.instrucao) r.instrucao_do_seu_setor = meu.instrucao;
+    const automacoes = this.automacoes?.paraEquipe(id);
+    if (automacoes) r.automacoes_ligadas_a_voce = automacoes;
     const revisor = this.revisorAtivo(id);
     if (revisor) r.suas_entregas_passam_por = `${this.cerebro.sessao(revisor).nome} (tudo o que você mandar vai para ele revisar antes de seguir)`;
     const revisados = this.cerebro.revisados(id).filter(x => this.ativas.has(x)).map(x => this.cerebro.sessao(x).nome);
@@ -753,6 +755,9 @@ class Janelas {
 
   enviar(de, para, texto) {
     const alvo = this.achar(para);
+    // a devolutiva de uma automação ligada a este agente (um colega ligado com o mesmo nome tem a preferência)
+    const automacao = this.automacoes?.daJanela(de, para);
+    if (automacao && !(alvo && this.cerebro.conectados(de).has(alvo))) return this.automacoes.devolver(automacao, de, texto);
     if (!alvo) return `Não há janela aberta chamada "${para}". Veja os nomes com equipe.`;
     if (alvo === de) return 'Você não pode mandar mensagem para você mesmo.';
     // revisão no caminho: tudo o que um agente revisado manda vai para o revisor dele, com a tarefa junto
