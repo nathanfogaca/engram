@@ -5,6 +5,14 @@ import { $, el, api, avisar } from "./util.js";
 
 export const COR_AGENTE = { claude: "#ff9f6b", codex: "#7ee0c3", gemini: "#6aa8ff", opencode: "#c9a7ff" };
 const LETRA = { claude: "C", codex: "X", gemini: "G", opencode: "O" };
+// o ícone de cada agente (o mesmo do site); agente sem ícone fica com a letra
+const LOGO = { claude: "marca/claude.png", codex: "marca/codex.png", gemini: "marca/gemini.png", opencode: "marca/opencode.svg" };
+
+/** O ícone do agente: o logo dele, com o brilho na cor do agente; sem logo, a letra no orbe. */
+export function iconeAgente(id, classe = "conta-orbe") {
+  if (!LOGO[id]) return el("span", { class: classe, text: LETRA[id] || "?" });
+  return el("span", { class: `${classe} logo` }, el("img", { src: LOGO[id], alt: "", draggable: "false" }));
+}
 
 export class Contas {
   constructor({ aoMudar } = {}) {
@@ -47,7 +55,7 @@ export class Contas {
   desenhar() {
     if (!this.dados.length) {
       this.lista.replaceChildren(...["claude", "codex", "gemini", "opencode"].map(id =>
-        el("article", { class: "conta fantasma", style: { "--cor": COR_AGENTE[id] } }, el("span", { class: "conta-orbe", text: LETRA[id] }))));
+        el("article", { class: "conta fantasma", style: { "--cor": COR_AGENTE[id] } }, iconeAgente(id))));
       return;
     }
     this.lista.replaceChildren(...this.dados.map((p, i) => this.cartao(p, i)));
@@ -87,7 +95,7 @@ export class Contas {
     const instalar = !p.instalado ? el("code", { class: "conta-cmd", text: p.instalar, title: "O comando oficial que o botão Instalar roda" }) : null;
     return el("article", { class: `conta estado-${estado}`, style: { "--cor": cor, "--i": i } },
       el("div", { class: "conta-topo" },
-        el("span", { class: "conta-orbe", text: LETRA[p.id] || "?" }),
+        iconeAgente(p.id),
         el("div", { class: "conta-nome" }, el("b", { text: p.nome }), el("small", { text: p.empresa })),
         el("div", { class: "conta-tags" }, ...tags)),
       el("div", { class: "conta-estado" }, el("span", { class: "ponto" }), el("span", { text: textoEstado })),

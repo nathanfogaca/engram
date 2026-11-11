@@ -8,7 +8,7 @@ import { Palco } from "./palco.js";
 import { Cerebro } from "./cerebro.js";
 import { Gaveta } from "./gaveta.js";
 import { Leitor } from "./conversa.js";
-import { Contas, COR_AGENTE } from "./contas.js";
+import { Contas, COR_AGENTE, iconeAgente } from "./contas.js";
 import { Ajustes } from "./ajustes.js";
 import { aplicarTema } from "./geral.js";
 import { PrimeiroUso } from "./primeiro-uso.js";
@@ -106,7 +106,7 @@ function dialogoAgente(papel = "livre") {
     title: p.instalado ? "" : "Não instalado neste computador: veja em Contas",
   },
     el("input", { type: "radio", name: "agente", value: p.id, checked: p.id === escolhido, disabled: !p.instalado, onchange: () => { desenharModelos(p.id, papel); desenharMcps(p.id); } }),
-    el("b", {}, el("span", { class: "ponto", style: { "--c": COR_AGENTE[p.id] || "#a5b4fc" } }), p.nome),
+    el("b", {}, iconeAgente(p.id, "ag-logo"), p.nome),
     el("small", { text: !p.instalado ? "não instalado · ver Contas" : p.conectado === false ? "sem login · ver Contas" : p.experimental ? "experimental" : "pronto" }))));
   desenharModelos(escolhido, papel);
   desenharMcps(escolhido);

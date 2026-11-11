@@ -849,6 +849,17 @@ textarea#sql:focus { border-color: rgb(var(--acento1) / .6); box-shadow: 0 0 0 4
 }
 .conta.estado-ok .conta-orbe { animation: orbe-respirar 3.2s ease-in-out infinite; }
 @keyframes orbe-respirar { 50% { box-shadow: 0 0 0 1px rgb(var(--tinta) / .3) inset, 0 0 38px 2px var(--cor); } }
+/* o logo do agente no lugar da letra: o brilho na cor dele segue o contorno do logo */
+.conta-orbe.logo { background: none; box-shadow: none; border-radius: 0; }
+.conta-orbe.logo img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 0 8px color-mix(in srgb, var(--cor) 45%, transparent)); }
+.conta.estado-ok .conta-orbe.logo { animation: none; }
+.conta.estado-ok .conta-orbe.logo img { animation: logo-respirar 3.2s ease-in-out infinite; }
+@keyframes logo-respirar { 50% { filter: drop-shadow(0 0 16px var(--cor)); } }
+.conta.estado-fora .conta-orbe.logo img, .guia-conta.estado-fora .conta-orbe.logo img { filter: grayscale(.7); }
+.ag-logo { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; font-weight: 800; font-size: 12px; }
+.ag-logo img { width: 100%; height: 100%; object-fit: contain; }
+.op:has(input:checked) .ag-logo img { filter: drop-shadow(0 0 6px var(--cor)); }
+.op.indisponivel .ag-logo img { filter: grayscale(1); opacity: .6; }
 .conta-nome { display: grid; flex: 1; min-width: 0; }
 .conta-nome b { font-size: 16px; }
 .conta-nome small { color: var(--discreto); font-size: 12px; }

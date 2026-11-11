@@ -2,7 +2,7 @@
 // Aparece quando o Engram nunca foi usado (sem janelas, sem guia concluído, sem importação do Engram antigo).
 
 import { el, api, app, avisar } from "./util.js";
-import { COR_AGENTE } from "./contas.js";
+import { COR_AGENTE, iconeAgente } from "./contas.js";
 import { PALETAS, aplicarTema, miniatura } from "./geral.js";
 
 const PASSOS = ["Boas-vindas", "Contas", "Agente", "MCPs e skills", "Primeiro time"];
@@ -68,7 +68,7 @@ export class PrimeiroUso {
       lista.replaceChildren(...this.contas.map((p, i) => {
         const estado = !p.instalado ? "fora" : p.conectado ? "ok" : "sem";
         return el("div", { class: `guia-conta estado-${estado}`, style: { "--cor": COR_AGENTE[p.id], "--i": i } },
-          el("span", { class: "conta-orbe", text: { claude: "C", codex: "X", gemini: "G", opencode: "O" }[p.id] }),
+          iconeAgente(p.id),
           el("div", { class: "aj-nome" }, el("b", { text: p.nome }), el("small", { text: { fora: "não instalado", ok: `conectado · ${p.como || ""}`, sem: "instalado, falta entrar" }[estado] })),
           estado === "ok" ? el("span", { class: "guia-ok", text: "✓" })
             : el("button", { type: "button", class: "btn pequeno", onclick: () => this.ajustes.abrir("contas") }, estado === "fora" ? "Instalar" : "Entrar"));
