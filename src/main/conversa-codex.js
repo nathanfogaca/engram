@@ -90,6 +90,46 @@ function ler(caminho, desde = 0, ultimos = null) {
   return { itens, ate: desde + fim + 1 };
 }
 
+/**
+ * Só as chamadas de ferramenta e o fim de cada uma, com a entrada inteira (a vista Conversa corta em 3000 letras).
+ * Serve para as linhas do cérebro: que nota o agente abriu ou gravou. `escapado`: a entrada veio dentro de uma
+ * string (código do "exec", argumentos em JSON) e os caminhos estão com barras dobradas.
+ */
+function chamadas(caminho, desde = 0) {
+  let dados;
+  try {
+    const fd = fs.openSync(caminho, 'r');
+    const n = Math.max(0, Math.min(fs.fstatSync(fd).size - desde, 8 << 20));
+    dados = Buffer.alloc(n);
+    fs.readSync(fd, dados, 0, n, desde);
+    fs.closeSync(fd);
+  } catch { return { itens: [], ate: desde }; }
+  const fim = dados.lastIndexOf(0x0a);
+  if (fim < 0) return { itens: [], ate: desde };
+  const itens = [];
+  for (const linha of dados.subarray(0, fim + 1).toString('utf8').split('\n')) {
+    if (!linha.includes('"response_item"')) continue;
+    let r;
+    try { r = JSON.parse(linha); } catch { continue; }
+    const p = r.payload || {};
+    if (['function_call', 'custom_tool_call', 'local_shell_call', 'mcp_tool_call'].includes(p.type)) {
+      const bruto = p.arguments ?? p.input ?? p.action ?? '';
+      const id = p.call_id || p.id;
+      if (typeof bruto === 'string') itens.push({ tipo: 'chamada', id, nome: p.name || p.type, texto: bruto, escapado: !(p.type === 'custom_tool_call' && p.name !== 'exec') });
+      else if (bruto && typeof bruto === 'object') {
+        // local_shell_call: { command: [...], working_directory }
+        const comando = Array.isArray(bruto.command) ? bruto.command.join(' ') : String(bruto.command || bruto.cmd || '');
+        itens.push({ tipo: 'chamada', id, nome: p.name || p.type, texto: comando, escapado: false, base: bruto.working_directory || bruto.workdir || '' });
+      }
+      // o local_shell_call já vem com o resultado (status), sem um item de saída depois
+      if (p.type === 'local_shell_call' && p.status && p.status !== 'in_progress') itens.push({ tipo: 'fim', ref: id });
+    } else if (['function_call_output', 'custom_tool_call_output', 'mcp_tool_call_output'].includes(p.type)) {
+      itens.push({ tipo: 'fim', ref: p.call_id });
+    }
+  }
+  return { itens, ate: desde + fim + 1 };
+}
+
 function texto(conteudo) {
   if (typeof conteudo === 'string') return conteudo;
   return (conteudo || []).map(b => (['input_text', 'output_text', 'text'].includes(b.type) ? b.text || '' : b.type === 'input_image' ? '(imagem)' : '')).join('\n');
@@ -129,4 +169,4 @@ function itensDe(d) {
   return [];
 }
 
-module.exports = { acharPorExterno, acharPelaMarca, externoDoCaminho, ler };
+module.exports = { acharPorExterno, acharPelaMarca, externoDoCaminho, ler, chamadas };

@@ -18,6 +18,7 @@ const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando'
 const LIVRE = new Set(['pronta', 'esperando você']);
 const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
 const { lerPergunta, TECLAS, TRABALHANDO } = require('./pergunta');
+const { notasDoComando, analisarCodex, resolver } = require('./notas-tocadas'); // linhas do cérebro pelos comandos
 const OCUPADO_ESTADO = new Set(['pensando', 'trabalhando']);
 const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
 // as cores dos setores, as mesmas da tela (src/tela/js/setores.js)
@@ -142,6 +143,7 @@ class Janelas {
     // "iniciando" continua iniciando: pode estar parado numa pergunta do CLI (verificarPergunta olha a tela)
     j.estado = s.estado === 'encerrada' ? 'esperando você' : s.estado === 'precisa de você' && !j.pergunta ? 'iniciando' : s.estado;
     j.criadaEm = Date.now() - 3000;
+    j.pasta = s.pasta || '';
     this.ativas.set(s.id, j);
     this.cerebro.sessaoReabrir(s.id, j.estado);
   }
@@ -245,6 +247,8 @@ class Janelas {
     await this.motor.pedir('abrir', { id, argv, cwd, env, linhas: 28, colunas: 100 });
     const j = new Janela(id, this.motor, provedor);
     j.arquivosAssinatura = this.arquivos.assinatura(id);
+    j.pasta = cwd;
+    j.conversaNova = !continuar; // conversa que começa agora: as linhas do cérebro valem desde o início dela
     this.ativas.set(id, j);
     this.cerebro.sessaoCriar(id, nome, provedor, modelo, papel, cwd);
     // conversa nova: o nome dela é o deste prompt; retomada: continua o nome com que ela começou
@@ -623,7 +627,11 @@ class Janelas {
       if (j.conversa) {
         let tam = j.conversaTam;
         try { tam = fs.statSync(j.conversa).size; } catch { /* some e volta */ }
-        if (tam !== j.conversaTam) { j.conversaTam = tam; this.avisar({ tipo: 'conversa', sessao_id: id, tam }); }
+        if (tam !== j.conversaTam) {
+          j.conversaTam = tam;
+          this.avisar({ tipo: 'conversa', sessao_id: id, tam });
+          try { this.lerFerramentas(id, j); } catch { /* linha estranha: fica para a próxima */ }
+        }
       }
       const assinatura = this.arquivos.assinatura(id);
       if (assinatura !== j.arquivosAssinatura) {
@@ -1143,34 +1151,37 @@ class Janelas {
     }
     const resumo = resumoEvento(evento, ferramenta, entrada, String(dados.mensagem || ''));
     if (['UserPromptSubmit', 'PreToolUse', 'Stop', 'Notification', 'SessionStart'].includes(evento)) this.cerebro.registrarEvento(id, evento, ferramenta, resumo);
-    const toques = evento === 'PostToolUse' ? this.toques(ferramenta, entrada) : [];
-    for (const [destino, tipo, rel] of toques) {
-      this.cerebro.registrarToque(id, destino, tipo);
-      if (tipo === 'gravou' && rel) this.cerebro.sincronizarArquivo(rel).then(erro => this.avisar({ tipo: 'cerebro', mudou: rel, erro }));
-    }
+    const toques = evento === 'PostToolUse' ? this.registrarToques(id, this.toques(ferramenta, entrada, j.pasta)) : [];
     this.avisar({ tipo: 'evento', sessao_id: id, evento, estado, ferramenta, resumo, toques: toques.map(([d, t]) => ({ destino: d, tipo: t })), ...(semPergunta === null ? { pergunta: null } : {}) });
     try { this.aoEvento?.(id, evento, ferramenta, entrada); } catch { /* quem acompanha não atrapalha o agente */ }
     if (evento === 'SessionStart') this.tentarEntregar(j, 2000); // a tela do agente ainda está montando
     else if (evento === 'Stop' || evento === 'Notification') this.tentarEntregar(j, 600);
   }
 
-  /** O que a ferramenta tocou: notas do cérebro e servidores MCP. */
-  toques(ferramenta, entrada) {
+  /**
+   * O que a ferramenta tocou: notas do cérebro e servidores MCP. `base`: a pasta em que o agente roda, para os
+   * caminhos relativos dos comandos de terminal.
+   */
+  toques(ferramenta, entrada, base = '') {
     if (!ferramenta) return [];
     const saida = [];
-    const nota = caminho => {
-      const rel = this.fonte.relativo(caminho);
-      return rel ? [idDoCaminho(rel), rel] : null;
-    };
-    if (this.fonte.tipo === 'pasta' && ['Read', 'Write', 'Edit', 'MultiEdit'].includes(ferramenta)) {
-      const n = nota(entrada.file_path);
-      if (n) saida.push([n[0], ferramenta === 'Read' ? 'leu' : 'gravou', n[1]]);
+    if (this.fonte.tipo === 'pasta') {
+      if (['Read', 'Write', 'Edit', 'MultiEdit'].includes(ferramenta)) {
+        const n = this.nota(entrada.file_path);
+        if (n) saida.push([n[0], ferramenta === 'Read' ? 'leu' : 'gravou', n[1]]);
+      } else if (ferramenta === 'Grep' && entrada.path) {
+        const n = this.nota(entrada.path);
+        if (n) saida.push([n[0], 'leu', n[1]]);
+      } else if (['Bash', 'PowerShell'].includes(ferramenta) && entrada.command) {
+        // o agente abriu ou gravou a nota por comando (Get-Content, cat, Set-Content, redirecionamento...)
+        saida.push(...this.notasCitadas(notasDoComando(entrada.command, [base])));
+      }
     }
     const m = /^mcp__([^_]+(?:[-_][^_]+)*?)__(.+)$/.exec(ferramenta);
-    if (m && m[1] !== 'engram') {
+    if (m && !mesmoServidor(m[1], 'engram')) {
       const [, servidor, nomeF] = m;
-      if (this.fonte.tipo === 'remoto' && servidor === this.fonte.servidor && /^arquivos_(ler|gravar|editar)$/.test(nomeF)) {
-        const n = nota(entrada.caminho);
+      if (this.fonte.tipo === 'remoto' && mesmoServidor(servidor, this.fonte.servidor) && /^arquivos_(ler|gravar|editar)$/.test(nomeF)) {
+        const n = this.nota(entrada.caminho);
         if (n) saida.push([n[0], nomeF === 'arquivos_ler' ? 'leu' : 'gravou', n[1]]);
       } else if (!/^arquivos_/.test(nomeF)) {
         saida.push([servidor, 'consultou', null]);
@@ -1178,6 +1189,88 @@ class Janelas {
     }
     return saida;
   }
+
+  /** [id, caminho relativo] da nota, ou null se o caminho é de fora do cérebro. */
+  nota(caminho) {
+    const rel = this.fonte.relativo(caminho);
+    return rel ? [idDoCaminho(rel), rel] : null;
+  }
+
+  /** Dos .md citados num comando, os que são notas do cérebro: [id, 'leu' | 'gravou', rel]. */
+  notasCitadas(candidatos) {
+    const saida = [];
+    for (const c of candidatos) {
+      const abs = resolver(c, p => { try { return fs.statSync(p).isFile(); } catch { return false; } });
+      const n = abs && this.nota(abs);
+      if (n) saida.push([n[0], c.tipo, n[1]]);
+    }
+    return saida;
+  }
+
+  /** Registra os toques (sem repetir no mesmo lote), sincroniza as notas gravadas e devolve a lista. */
+  registrarToques(id, toques) {
+    const vistos = new Set();
+    const lista = toques.filter(([d, t]) => !vistos.has(`${d}|${t}`) && vistos.add(`${d}|${t}`));
+    for (const [destino, tipo, rel] of lista) {
+      this.cerebro.registrarToque(id, destino, tipo);
+      if (tipo === 'gravou' && rel) this.cerebro.sincronizarArquivo(rel).then(erro => this.avisar({ tipo: 'cerebro', mudou: rel, erro }));
+    }
+    return lista;
+  }
+
+  /**
+   * Agentes sem ganchos (Codex): as notas e os MCPs que as ferramentas tocaram, lidos da conversa que o CLI grava.
+   * Conta quando a ferramenta termina (a nota gravada já está no disco). Conversa nova é lida desde o começo;
+   * a retomada, só do ponto em que o Engram a encontrou.
+   */
+  lerFerramentas(id, j) {
+    if (j.provedor !== 'codex' || !j.conversa) return;
+    if (j.conversaLida === undefined) {
+      let tam = 0;
+      try { tam = fs.statSync(j.conversa).size; } catch { /* ainda não existe */ }
+      j.conversaLida = j.conversaNova ? 0 : tam;
+      j.chamadasAbertas = new Map();
+    }
+    const { itens, ate } = conversaCodex.chamadas(j.conversa, j.conversaLida);
+    j.conversaLida = ate;
+    const toques = [];
+    for (const it of itens) {
+      if (it.tipo === 'chamada') {
+        if (it.id) j.chamadasAbertas.set(it.id, it);
+        else toques.push(...this.toquesCodex(it, j));
+      } else if (it.tipo === 'fim' && j.chamadasAbertas.has(it.ref)) {
+        toques.push(...this.toquesCodex(j.chamadasAbertas.get(it.ref), j));
+        j.chamadasAbertas.delete(it.ref);
+      }
+    }
+    if (j.chamadasAbertas.size > 100) j.chamadasAbertas = new Map([...j.chamadasAbertas].slice(-20)); // chamada que nunca terminou
+    if (!toques.length) return;
+    const lista = this.registrarToques(id, toques);
+    this.avisar({ tipo: 'evento', sessao_id: id, evento: 'Ferramenta', estado: null, ferramenta: null, resumo: null, toques: lista.map(([d, t]) => ({ destino: d, tipo: t })) });
+  }
+
+  toquesCodex(chamada, j) {
+    const { arquivos, mcps } = analisarCodex({ nome: chamada.nome, texto: chamada.texto, escapado: chamada.escapado, base: chamada.base || j.pasta });
+    const saida = this.fonte.tipo === 'pasta' ? this.notasCitadas(arquivos) : [];
+    // MCP: "mcp__servidor__ferramenta" ou, no Codex novo, "servidor__ferramenta" de um servidor conhecido
+    const conhecidos = ['engram', this.fonte.servidor, ...(this.mcps?.estado.servidores || []).map(s => s.id)].filter(Boolean);
+    for (const m of mcps) {
+      let nome = m.ferramenta;
+      if (!nome.startsWith('mcp__')) {
+        const servidor = nome.slice(0, nome.indexOf('__'));
+        if (!conhecidos.some(s => mesmoServidor(s, servidor))) continue; // web__run, image_gen__...: do próprio Codex
+        nome = `mcp__${nome}`;
+      }
+      saida.push(...this.toques(nome, m.entrada));
+    }
+    return saida;
+  }
+}
+
+/** O Codex troca "-" por "_" no nome do servidor MCP: "meu-servidor" e "meu_servidor" são o mesmo. */
+function mesmoServidor(a, b) {
+  const n = s => String(s || '').toLowerCase().replace(/-/g, '_');
+  return n(a) === n(b);
 }
 
 function pedePermissao(d) {

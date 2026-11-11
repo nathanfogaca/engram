@@ -362,7 +362,7 @@ function tratar(m) {
       if (palco.cartoes.has(s.id)) palco.atualizar(s);
       else {
         palco.adicionar(s);
-        avisar({ rota: s.nome, texto: `entrou no palco · ${nomeModelo(s.modelo)}`, cor: corModelo(s.modelo) });
+        avisar({ rota: s.nome, texto: `entrou no palco · ${s.nome_modelo || nomeModelo(s.modelo, s.provedor)}`, cor: corModelo(s.modelo) });
       }
     } else {
       palco.marcarEncerrada(s.id);

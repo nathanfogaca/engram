@@ -804,7 +804,7 @@ export class Cerebro {
     let fonteAtual = "";
     for (const n of candidatos) {
       const emFoco = n.emFoco, forte = n.tipo === "agente" || emFoco;
-      const texto = n.tipo === "agente" ? `${n.titulo} · ${nomeModelo(n.modelo)}`
+      const texto = n.tipo === "agente" ? `${n.titulo} · ${nomeModelo(n.modelo, n.provedor)}`
         : ["chamado", "tabela", "pendente"].includes(n.tipo) ? n.id : encurtarRotulo(n.titulo);
       const tam = (n.tipo === "agente" ? 12.5 : emFoco ? 12 : 11) / raizZ;
       // a largura do texto é medida uma vez só (numa letra de 100 px) e guardada no neurônio
@@ -912,7 +912,7 @@ export class Cerebro {
       return;
     }
     caixa.dataset.sobre = "1";
-    const tipo = n.tipo === "agente" ? `Agente · ${nomeModelo(n.modelo)} · ${n.estado || ""}` : `${NOME_TIPO_UM[n.tipo] || n.tipo} · ${n.id}`;
+    const tipo = n.tipo === "agente" ? `Agente · ${nomeModelo(n.modelo, n.provedor)} · ${n.estado || ""}` : `${NOME_TIPO_UM[n.tipo] || n.tipo} · ${n.id}`;
     caixa.replaceChildren();
     const b = document.createElement("b");
     b.textContent = n.titulo || n.id;

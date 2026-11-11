@@ -94,8 +94,8 @@ class Cerebro {
       if (!nos.has(l.destino)) nos.set(l.destino, pendente(l.destino));
       arestas.push({ ...l });
     }
-    const sessoes = this.q('SELECT id, nome, modelo, papel, estado FROM sessoes WHERE encerrada IS NULL').all();
-    for (const s of sessoes) nos.set(`sessao:${s.id}`, { id: `sessao:${s.id}`, tipo: 'agente', titulo: s.nome, modelo: s.modelo, papel: s.papel, estado: s.estado });
+    const sessoes = this.q('SELECT id, nome, provedor, modelo, papel, estado FROM sessoes WHERE encerrada IS NULL').all();
+    for (const s of sessoes) nos.set(`sessao:${s.id}`, { id: `sessao:${s.id}`, tipo: 'agente', titulo: s.nome, provedor: s.provedor, modelo: s.modelo, papel: s.papel, estado: s.estado });
     const toques = this.q('SELECT t.sessao, t.destino, t.tipo, t.vezes FROM toques t JOIN sessoes s ON s.id = t.sessao WHERE s.encerrada IS NULL').all();
     for (const t of toques) {
       if (!nos.has(t.destino)) nos.set(t.destino, pendente(t.destino));

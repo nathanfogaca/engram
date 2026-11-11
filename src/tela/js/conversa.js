@@ -483,7 +483,7 @@ export class Leitor {
   abas() {
     const abas = [...this.cartoes().values()].filter(c => c.viva).map(c => el("button", {
       class: `leitor-aba${c.id === this.id ? " ativa" : ""}${OCUPADO.has(c.estado) ? " ocupado" : ""}${ATENCAO.has(c.estado) ? " atencao" : ""}`,
-      style: { "--cor": c.cor }, title: `${nomePapel(c.info.papel)} · ${nomeModelo(c.info.modelo)}`,
+      style: { "--cor": c.cor }, title: `${nomePapel(c.info.papel)} · ${(c.info.nome_modelo || nomeModelo(c.info.modelo, c.info.provedor))}`,
       onclick: () => this.abrir(c.id),
     }, el("span", { class: "orbe" }), c.info.nome));
     $("#leitor-abas").replaceChildren(...abas);

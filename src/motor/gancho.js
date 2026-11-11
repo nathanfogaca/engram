@@ -13,7 +13,8 @@ function curto(entrada) {
   if (entrada && typeof entrada === 'object') {
     for (const c of CAMPOS) {
       const v = entrada[c];
-      if (['string', 'number'].includes(typeof v)) saida[c] = String(v).slice(0, 200);
+      // o comando vai mais inteiro: o Engram procura nele as notas do cérebro que o agente abriu ou gravou
+      if (['string', 'number'].includes(typeof v)) saida[c] = String(v).slice(0, c === 'command' ? 4000 : 200);
     }
   }
   return saida;

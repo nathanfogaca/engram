@@ -188,7 +188,7 @@ export class Gaveta {
           el("b", { text: s.nome }),
           el("span", { class: `tag${s.papel === "maestro" ? " maestro" : ""}`, text: s.papel === "maestro" ? "♛ Maestro" : nomePapel(s.papel) }),
           el("span", { class: "chip empurra", text: aberta ? s.estado : "encerrada" })),
-        el("div", { class: "det", text: `${nomeModelo(s.modelo)} · aberta ${dataHora(s.criada)}` }),
+        el("div", { class: "det", text: `${nomeModelo(s.modelo, s.provedor)} · aberta ${dataHora(s.criada)}` }),
         el("div", { class: "linha" },
           aberta ? el("button", { class: "btn pequeno", text: "Ver no palco", onclick: () => this.aoFocarAgente(s.id) }) : null,
           !aberta ? el("button", { class: "btn-brilho pequeno", onclick: () => this.aoRetomar(s) }, el("span", { text: "Retomar" })) : null,

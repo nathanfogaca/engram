@@ -97,7 +97,11 @@ export const app = {
   maxJanelas: 8,
   vista: "palco",
 };
-export const nomeModelo = id => (app.modelos.find(m => m.id === id) || { nome: id || "Padrão" }).nome;
+// o nome do modelo na lista do agente dele (o "" do Codex é "Padrão do Codex", não o do Claude)
+export const nomeModelo = (id, provedor) => {
+  const lista = (provedor && app.provedores?.find(p => p.id === provedor)?.modelos) || app.modelos;
+  return (lista.find(m => m.id === id) || { nome: id || "Padrão" }).nome;
+};
 export const nomePapel = id => (app.papeis.find(p => p.id === id) || { nome: id }).nome;
 
 // ------------------------------------------------------------------ avisos (toasts)
