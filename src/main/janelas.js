@@ -18,7 +18,7 @@ const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando'
 const LIVRE = new Set(['pronta', 'esperando você']);
 const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
 const { lerPergunta, TECLAS, TRABALHANDO } = require('./pergunta');
-const { notasDoComando, analisarCodex, resolver } = require('./notas-tocadas'); // linhas do cérebro pelos comandos
+const { notasDoComando, analisarCodex, resolver, trechosDoPatch, desescapar } = require('./notas-tocadas'); // linhas do cérebro e bolha do palco
 const OCUPADO_ESTADO = new Set(['pensando', 'trabalhando']);
 const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
 // as cores dos setores, as mesmas da tela (src/tela/js/setores.js)
@@ -1236,6 +1236,7 @@ class Janelas {
     const toques = [];
     for (const it of itens) {
       if (it.tipo === 'chamada') {
+        try { this.pensamentoCodex(id, j, it); } catch { /* patch estranho: sem bolha */ }
         if (it.id) j.chamadasAbertas.set(it.id, it);
         else toques.push(...this.toquesCodex(it, j));
       } else if (it.tipo === 'fim' && j.chamadasAbertas.has(it.ref)) {
@@ -1247,6 +1248,18 @@ class Janelas {
     if (!toques.length) return;
     const lista = this.registrarToques(id, toques);
     this.avisar({ tipo: 'evento', sessao_id: id, evento: 'Ferramenta', estado: null, ferramenta: null, resumo: null, toques: lista.map(([d, t]) => ({ destino: d, tipo: t })) });
+  }
+
+  /** A bolha do palco no Codex: o que o apply_patch vai escrever, lido da conversa (o Codex não tem ganchos). */
+  pensamentoCodex(id, j, chamada) {
+    if (this.cfg.pensamento_no_palco === false || !/\*\*\* (Add|Update|Delete) File:/.test(chamada.texto)) return;
+    const base = j.pasta || this.cfg.pasta_trabalho || '';
+    const corta = l => (l.length > 160 ? `${l.slice(0, 160)}…` : l);
+    for (const t of trechosDoPatch(chamada.escapado ? desescapar(chamada.texto) : chamada.texto)) {
+      const r = path.relative(base, path.resolve(base, t.arquivo));
+      const rel = r && !r.startsWith('..') && !path.isAbsolute(r) ? r.split(path.sep).join('/') : t.arquivo;
+      this.avisar({ tipo: 'pensamento', sessao: id, fase: 'escreveu', rel, linha: null, contexto: [], novas: t.novas.slice(0, 60).map(corta), mais: t.novas.length, menos: t.menos, cortado: t.novas.length > 60 });
+    }
   }
 
   toquesCodex(chamada, j) {

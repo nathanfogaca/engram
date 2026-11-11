@@ -1198,3 +1198,74 @@ textarea#sql:focus { border-color: rgb(var(--acento1) / .6); box-shadow: 0 0 0 4
 .cab-btn.olho:hover { color: var(--ciano); background: rgb(var(--acento2) / .14); }
 .cartao.ocupado .cab-btn.olho { color: var(--ciano); animation: olho-brilha 1.6s ease-in-out infinite; }
 @keyframes olho-brilha { 50% { text-shadow: 0 0 10px var(--ciano); background: rgb(var(--acento2) / .12); } }
+
+/* ------------------------------------------------------------------ bolha de pensamento: o código sendo escrito, em cima do cartão */
+.bolha-ancora { --cor: #8b7bff; position: absolute; width: 0; height: 0; z-index: 60000; }
+.bolha {
+  position: absolute; left: 0; bottom: 18px; width: 460px; padding: 0 0 8px; border-radius: 16px; cursor: pointer; transform-origin: 26px 100%;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--cor) 9%, var(--vidro-forte)), var(--vidro-forte));
+  border: 1px solid color-mix(in srgb, var(--cor) 42%, transparent);
+  box-shadow: 0 22px 60px rgb(0 0 0 / .5), 0 0 0 1px rgb(var(--tinta) / .04) inset, 0 0 38px -10px var(--cor);
+  animation: bolha-entra .45s var(--mola) both;
+}
+.bolha-ancora.escrevendo .bolha { animation: bolha-entra .45s var(--mola) both, bolha-brilha 1.8s ease-in-out .45s infinite; }
+.bolha-ancora.saindo .bolha { animation: bolha-sai .34s ease-in forwards; pointer-events: none; }
+@keyframes bolha-entra { from { opacity: 0; transform: translateY(12px) scale(.9); } }
+@keyframes bolha-sai { to { opacity: 0; transform: translateY(8px) scale(.95); } }
+@keyframes bolha-brilha { 50% { box-shadow: 0 22px 60px rgb(0 0 0 / .5), 0 0 0 1px rgb(var(--tinta) / .05) inset, 0 0 56px -6px var(--cor); } }
+/* o rabo de pensamento: duas bolinhas descendo até o cartão */
+.bolha-rabo::before, .bolha-rabo::after {
+  content: ""; position: absolute; border-radius: 50%; background: var(--vidro-forte);
+  border: 1px solid color-mix(in srgb, var(--cor) 42%, transparent); box-shadow: 0 0 14px -2px var(--cor);
+}
+.bolha-rabo::before { width: 12px; height: 12px; left: 18px; bottom: -14px; }
+.bolha-rabo::after { width: 7px; height: 7px; left: 10px; bottom: -24px; }
+.bolha-ancora.escrevendo .bolha-rabo::before { animation: bolha-bolinha 1.2s ease-in-out infinite; }
+.bolha-ancora.escrevendo .bolha-rabo::after { animation: bolha-bolinha 1.2s ease-in-out .2s infinite; }
+@keyframes bolha-bolinha { 50% { transform: translateY(-3px); box-shadow: 0 0 20px 0 var(--cor); } }
+.bolha-cab { display: flex; align-items: center; gap: 8px; padding: 9px 8px 7px 12px; color: var(--texto-forte); }
+.bolha-cab > .codicon { color: var(--cor); font-size: 14px; filter: drop-shadow(0 0 6px var(--cor)); }
+.bolha-arq { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px var(--mono); }
+.bolha-cont { display: inline-flex; gap: 6px; font: 600 11px var(--mono); }
+.bolha-cont i { font-style: normal; }
+.bolha-cont .mais { color: var(--verde); } .bolha-cont .menos { color: var(--perigo); }
+.bolha-cont .pensa {
+  color: transparent; background: linear-gradient(90deg, var(--discreto), var(--texto-forte), var(--discreto)); background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; animation: bolha-reluz 1.4s linear infinite; font-family: var(--sans);
+}
+@keyframes bolha-reluz { to { background-position: -200% 0; } }
+.bolha-fechar { width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--discreto); cursor: pointer; }
+.bolha-fechar:hover { background: rgb(var(--tinta) / .08); color: var(--texto-forte); }
+.bolha-codigo {
+  max-height: 182px; overflow: hidden; padding: 0 10px 0 2px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px); mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
+}
+.bolha-linha { position: relative; display: flex; gap: 10px; font: 12px/19px var(--mono); white-space: pre; color: var(--texto); }
+.bolha-num { width: 30px; flex: none; text-align: right; color: var(--apagado); opacity: .75; user-select: none; }
+.bolha-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bolha-linha.contexto { opacity: .42; }
+/* a marca da linha nova é um fundo (com o palco em zoom, uma sombra por dentro vazava um fio em volta da linha) */
+.bolha-linha.nova::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: 3px; pointer-events: none;
+  background: linear-gradient(90deg, #4ade9f 0 2px, rgb(74 222 159 / .16) 2px, transparent 80%);
+}
+.bolha-linha.nova.feita::before { animation: bolha-esmaece 5s ease-out forwards; }
+@keyframes bolha-esmaece { 0%, 30% { opacity: 1; } 100% { opacity: .35; } }
+.bolha-linha.nova:not(.feita) .bolha-txt::after {
+  content: ""; display: inline-block; width: 2px; height: 1.1em; margin-left: 1px; vertical-align: text-bottom;
+  background: var(--ciano); box-shadow: 0 0 8px var(--ciano), 0 0 16px var(--ciano); animation: bolha-cursor .5s steps(1) infinite;
+}
+@keyframes bolha-cursor { 50% { opacity: .2; } }
+.bolha-linha.removida .bolha-txt { color: var(--perigo); font-style: italic; }
+.bolha-linha.mais .bolha-txt { color: var(--discreto); font-style: italic; }
+.bolha .tk-c { color: #7f8ea3; font-style: italic; }
+.bolha .tk-s { color: #f6c177; }
+.bolha .tk-n { color: #7dd3fc; }
+.bolha .tk-k { color: #c4a7ff; }
+.bolha .tk-f { color: #82e9c1; }
+:root[data-tema="claro"] .bolha .tk-c { color: #6b7a90; }
+:root[data-tema="claro"] .bolha .tk-s { color: #a8580c; }
+:root[data-tema="claro"] .bolha .tk-n { color: #0369a1; }
+:root[data-tema="claro"] .bolha .tk-k { color: #7c3aed; }
+:root[data-tema="claro"] .bolha .tk-f { color: #047857; }
+@media (prefers-reduced-motion: reduce) { .bolha, .bolha-ancora.escrevendo .bolha, .bolha-rabo::before, .bolha-rabo::after { animation: none !important; } }

@@ -214,7 +214,7 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
   rota('POST', '/api/skills/:nome/abrir-pasta', erro400(p => { require('electron').shell.openPath(skills.caminho(p.nome)); return { ok: true }; }));
 
   // ---------------------------------------------------------------- geral, tema e primeiro uso
-  const CAMPOS_GERAIS = ['pasta_trabalho', 'max_janelas', 'max_mensagens_par_10min', 'max_arquivo_mb', 'contexto', 'atualizar_sozinho', 'padrao_agente', 'padrao_modelo'];
+  const CAMPOS_GERAIS = ['pasta_trabalho', 'max_janelas', 'max_mensagens_par_10min', 'max_arquivo_mb', 'contexto', 'atualizar_sozinho', 'padrao_agente', 'padrao_modelo', 'pensamento_no_palco'];
   // cérebro salvo que só vale depois de reiniciar (a tela mostra o salvo, não o que está em uso)
   let cerebroPendente = null;
   const chaveCerebro = x => (x.fonte === 'remoto'
@@ -223,6 +223,7 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
   rota('GET', '/api/config', () => ({
     ...Object.fromEntries(CAMPOS_GERAIS.map(k => [k, cfg[k] ?? null])),
     atualizar_sozinho: cfg.atualizar_sozinho !== false,
+    pensamento_no_palco: cfg.pensamento_no_palco !== false,
     cerebro: { ...(cerebroPendente || cfg.cerebro) }, cerebro_pendente: !!cerebroPendente,
     cerebro_fonte_ativa: cerebro.fonte.tipo, dados: caminhos.dados, versao,
   }));
@@ -245,6 +246,7 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
     numero('max_arquivo_mb', 1, 2000);
     if (b.contexto !== undefined) parcial.contexto = String(b.contexto).slice(0, 20_000);
     if (b.atualizar_sozinho !== undefined) parcial.atualizar_sozinho = !!b.atualizar_sozinho;
+    if (b.pensamento_no_palco !== undefined) parcial.pensamento_no_palco = !!b.pensamento_no_palco;
     if (b.padrao_agente !== undefined) { exigir(!b.padrao_agente || provedores.adaptador(b.padrao_agente), 400, 'agente desconhecido'); parcial.padrao_agente = b.padrao_agente || null; }
     if (b.padrao_modelo !== undefined) parcial.padrao_modelo = String(b.padrao_modelo || '');
     let reiniciar = false;

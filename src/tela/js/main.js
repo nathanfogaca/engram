@@ -342,6 +342,8 @@ function tratar(m) {
   } else if (m.tipo === "atualizacao") {
     mostrarAtualizacao(m);
     ajustes?.geral.mostrarAtualizacao(m); // a área de atualização nos Ajustes acompanha ao vivo
+  } else if (m.tipo === "pensamento") {
+    palco.pensamento(m); // a bolha com o código sendo escrito, em cima do cartão
   } else if (m.tipo === "aviso") {
     avisar({ texto: m.texto, cor: "#38d6f5", tempo: 7000 });
   } else if (m.tipo === "evento") {

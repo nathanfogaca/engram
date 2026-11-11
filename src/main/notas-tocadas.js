@@ -25,7 +25,9 @@ const ABRE_PARA_ESCREVER = /^["']?\s*,\s*["'][wax]/;
 
 /** Desfaz as barras de um texto que veio dentro de uma string (JSON ou JavaScript). */
 function desescapar(texto) {
-  return String(texto).replace(/\\(.)/g, (_, c) => (c === 'n' ? '\n' : c === 'r' ? '\r' : c === 't' ? '\t' : c));
+  // ã (acento escrito como código, comum em JSON) vira a letra; o resto, o caractere depois da barra
+  return String(texto).replace(/\\(u[0-9a-fA-F]{4}|.)/g, (_, c) => (c.length === 5 ? String.fromCharCode(parseInt(c.slice(1), 16))
+    : c === 'n' ? '\n' : c === 'r' ? '\r' : c === 't' ? '\t' : c));
 }
 
 /** Caminho de verdade: "~", variáveis da pasta do usuário e o jeito do Git Bash (/c/Users/...). */
@@ -85,6 +87,21 @@ function notasDoComando(comando, bases = []) {
     saida.push({ caminho: expandir(a.caminho), tipo, bases: todasBases });
   }
   return saida;
+}
+
+/** O que um apply_patch escreve, arquivo por arquivo: as linhas novas (+) e quantas saem (-). Para a bolha do palco. */
+function trechosDoPatch(texto) {
+  const saida = [];
+  let atual = null;
+  for (const bruta of String(texto || '').split('\n')) {
+    const linha = bruta.replace(/\r$/, '');
+    const m = /^\*\*\* (Add|Update|Delete) File: (.+?)\s*$/.exec(linha);
+    if (m) { atual = { arquivo: expandir(m[2]), novo: m[1] === 'Add', novas: [], menos: 0 }; saida.push(atual); continue; }
+    if (!atual || linha.startsWith('***')) continue; // fim do patch, "Move to:"
+    if (linha.startsWith('+')) atual.novas.push(linha.slice(1));
+    else if (linha.startsWith('-')) atual.menos++;
+  }
+  return saida.filter(t => t.novas.length || t.menos);
 }
 
 /** Os arquivos de um apply_patch (todos gravados). */
@@ -149,4 +166,4 @@ function resolver(candidato, existe) {
   return null;
 }
 
-module.exports = { notasDoComando, notasDoPatch, analisarCodex, resolver, desescapar, caminhosMd };
+module.exports = { notasDoComando, notasDoPatch, trechosDoPatch, analisarCodex, resolver, desescapar, caminhosMd };

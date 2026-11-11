@@ -120,11 +120,11 @@ export class PainelGeral {
     const maxJ = num(c.max_janelas, 1, 24), maxM = num(c.max_mensagens_par_10min, 5, 300), maxA = num(c.max_arquivo_mb, 1, 2000);
     const contexto = el("textarea", { rows: 6, placeholder: "Texto que entra no prompt de todas as janelas: o mapa dos sistemas da empresa, regras da casa, quem cuida do quê…" });
     contexto.value = c.contexto || "";
-    let atualizar = c.atualizar_sozinho;
+    let atualizar = c.atualizar_sozinho, pensamento = c.pensamento_no_palco !== false;
     const salvar = async () => {
       const corpo = {
         pasta_trabalho: pasta.value, max_janelas: maxJ.value, max_mensagens_par_10min: maxM.value, max_arquivo_mb: maxA.value,
-        contexto: contexto.value, atualizar_sozinho: atualizar,
+        contexto: contexto.value, atualizar_sozinho: atualizar, pensamento_no_palco: pensamento,
         cerebro: fonte === "remoto" ? { fonte, url: cerUrl.value, token_env: cerToken.value, ca: cerCa.value, pasta_remota: cerRemota.value, servidor: cerServidor.value } : { fonte, pasta: cerPasta.value },
       };
       try {
@@ -145,6 +145,9 @@ export class PainelGeral {
         el("small", { class: "aj-dica", text: `O normal é a pasta neste computador. O servidor remoto é para quem já tem as notas num servidor próprio, com as ferramentas arquivos_listar e arquivos_ler. Em uso agora: ${c.cerebro_fonte_ativa === "remoto" ? "servidor remoto" : "pasta neste computador"}.` })),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Limites" }),
         el("div", { class: "aj-campos tres" }, campo("Janelas abertas ao mesmo tempo", maxJ), campo("Mensagens entre dois agentes a cada 10 min", maxM, "Trava contra dois agentes respondendo um ao outro em loop."), campo("Tamanho máximo de arquivo (MB)", maxA))),
+      el("section", { class: "aj-grupo" }, el("h3", { text: "Palco" }),
+        el("label", { class: "aj-opcao" }, (() => { const i = el("input", { type: "checkbox", checked: pensamento, onchange: e => { pensamento = e.target.checked; } }); return el("span", { class: "chave" }, i, el("span")); })(),
+          el("span", {}, "Mostrar o código sendo escrito em cima do cartão ", el("small", { text: "(a bolha some sozinha; clicar nela abre o Visualizar trabalho)" })))),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Contexto para todos os agentes" }), el("div", { class: "aj-campo" }, contexto)),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Atualização" }), this.blocoAtualizacao(),
         el("label", { class: "aj-opcao" }, (() => { const i = el("input", { type: "checkbox", checked: atualizar, onchange: e => { atualizar = e.target.checked; } }); return el("span", { class: "chave" }, i, el("span")); })(),

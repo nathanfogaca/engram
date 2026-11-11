@@ -402,6 +402,7 @@ export class Palco {
 
   posicionar(c) {
     Object.assign(c.el.style, { left: `${c.x}px`, top: `${c.y}px`, width: `${c.w}px`, height: `${c.h}px` });
+    this.posicionarBolha(c);
   }
 
   /** Edita o nome no próprio cartão: Enter (ou clicar fora) salva, Esc desiste. */
@@ -477,6 +478,7 @@ export class Palco {
   marcarEncerrada(id) {
     const c = this.cartoes.get(id);
     if (!c) return;
+    this.esconderBolha(c);
     c.viva = false;
     this.marcarEstado(c, "encerrada");
     c.el.classList.add("encerrada");
@@ -507,6 +509,7 @@ export class Palco {
     if (!c) return;
     for (const f of [...this.fios.values()]) if (f.a === id || f.b === id) this.desligarLocal(f.a, f.b);
     this.cartoes.delete(id);
+    this.esconderBolha(c);
     this.setores.selecao.delete(id);
     this.setores.atualizarMembros(false);
     c.ws?.fechar();
@@ -873,4 +876,151 @@ export class Palco {
     this.camadaLemb.append(chip);
     chip.addEventListener("animationend", () => chip.remove(), { once: true });
   }
+
+  // ---------------------------------------------------------------- bolha de pensamento
+
+  /**
+   * A "janela de pensamento" em cima do cartão: o trecho que o agente acabou de escrever, digitado na hora, sem
+   * abrir o Visualizar trabalho. "vai": o agente vai gravar um arquivo; "escreveu": o trecho que mudou.
+   * Some sozinha; clicar nela abre a janela completa.
+   */
+  pensamento(m) {
+    const c = this.cartoes.get(m.sessao);
+    if (!c || !c.viva) return;
+    const b = c.bolha || this.criarBolha(c);
+    this.mostrarBolha(c);
+    if (m.fase === "vai") {
+      if (!b.digitando) {
+        this.cabecaBolha(b, m.rel, null);
+        b.codigo.replaceChildren(el("div", { class: "bolha-linha nova" }, el("span", { class: "bolha-num" }), el("span", { class: "bolha-txt" })));
+        b.el.classList.add("escrevendo");
+        clearTimeout(b.timer);
+        b.timer = setTimeout(() => this.esconderBolha(c), 20000); // gravou sem avisar o fim: não fica para sempre
+      }
+      return;
+    }
+    b.fila.push(m);
+    if (b.fila.length > 6) b.fila.splice(0, b.fila.length - 6); // muita coisa de uma vez: fica com as últimas
+    if (!b.digitando) this.proximaNaBolha(c);
+  }
+
+  criarBolha(c) {
+    const arq = el("b", { class: "bolha-arq" }), cont = el("span", { class: "bolha-cont" }), codigo = el("div", { class: "bolha-codigo" });
+    const fechar = el("button", { class: "bolha-fechar", title: "Fechar" }, el("i", { class: "codicon codicon-close" }));
+    const balao = el("div", { class: "bolha", title: "Abrir o Visualizar trabalho" },
+      el("div", { class: "bolha-cab" }, el("i", { class: "codicon codicon-edit" }), arq, cont, fechar), codigo, el("i", { class: "bolha-rabo" }));
+    const ancora = el("div", { class: "bolha-ancora", style: { "--cor": c.cor || "#8b7bff" } }, balao);
+    balao.addEventListener("pointerdown", e => e.stopPropagation()); // não arrasta o palco
+    balao.onclick = () => api("/api/trabalho/abrir", { json: { sessao: c.id } }).catch(e => avisar({ texto: e.message, cor: "#ff6b7d" }));
+    fechar.onclick = e => { e.stopPropagation(); this.esconderBolha(c); };
+    this.camadaLemb.append(ancora);
+    c.bolha = { el: ancora, balao, arq, cont, codigo, fila: [], digitando: false, timer: 0 };
+    this.posicionarBolha(c);
+    return c.bolha;
+  }
+
+  posicionarBolha(c) {
+    if (c.bolha) Object.assign(c.bolha.el.style, { left: `${c.x + 28}px`, top: `${c.y}px` });
+  }
+
+  mostrarBolha(c) {
+    const b = c.bolha;
+    clearTimeout(b.timer);
+    if (b.el.classList.contains("saindo")) { b.el.classList.remove("saindo"); void b.el.offsetWidth; }
+  }
+
+  esconderBolha(c) {
+    const b = c.bolha;
+    if (!b) return;
+    clearTimeout(b.timer);
+    c.bolha = null; // a próxima escrita abre outra
+    b.parado = true;
+    b.el.classList.add("saindo");
+    setTimeout(() => b.el.remove(), 360);
+  }
+
+  cabecaBolha(b, rel, m) {
+    const partes = String(rel || "").split("/");
+    b.arq.textContent = partes.length > 2 ? `…/${partes.slice(-2).join("/")}` : rel;
+    b.arq.title = rel;
+    b.cont.replaceChildren(...(m
+      ? [m.mais ? el("i", { class: "mais", text: `+${m.mais}` }) : null, m.menos ? el("i", { class: "menos", text: `−${m.menos}` }) : null].filter(Boolean)
+      : [el("i", { class: "pensa", text: "escrevendo" })]));
+  }
+
+  /** Digita o próximo trecho da fila; acabou a fila, a bolha fica um pouco e some. */
+  proximaNaBolha(c) {
+    const b = c.bolha;
+    if (!b || b.parado) return;
+    const m = b.fila.shift();
+    if (!m) {
+      b.digitando = false;
+      b.el.classList.remove("escrevendo");
+      clearTimeout(b.timer);
+      b.timer = setTimeout(() => this.esconderBolha(c), 7000);
+      return;
+    }
+    b.digitando = true;
+    b.el.classList.add("escrevendo");
+    clearTimeout(b.timer);
+    this.cabecaBolha(b, m.rel, m);
+    const linha = (texto, numero, classe) => el("div", { class: `bolha-linha ${classe}` },
+      el("span", { class: "bolha-num", text: numero == null ? "" : String(numero) }), pintarCodigo(el("span", { class: "bolha-txt" }), texto, Infinity));
+    const ctx = m.contexto || [];
+    b.codigo.replaceChildren(...ctx.map((t, i) => linha(t, m.linha ? m.linha - ctx.length + i : null, "contexto")));
+    if (!m.novas.length) {
+      b.codigo.append(el("div", { class: "bolha-linha removida" }, el("span", { class: "bolha-num" }), el("span", { class: "bolha-txt", text: `${m.menos} linha${m.menos === 1 ? "" : "s"} removida${m.menos === 1 ? "" : "s"}` })));
+      setTimeout(() => this.proximaNaBolha(c), 1600);
+      return;
+    }
+    // até uns 2,5 s por trecho (mais rápido quando há fila); com movimento reduzido, aparece de uma vez
+    const total = m.novas.reduce((s, l) => s + l.length + 1, 0);
+    const porQuadro = movimentoReduzido ? Infinity : Math.max(2, Math.ceil(total / (b.fila.length ? 40 : 150)));
+    let i = 0, pos = 0, atual = null;
+    const passo = () => {
+      if (b.parado) return;
+      let resta = porQuadro;
+      while (resta > 0 && i < m.novas.length) {
+        const texto = m.novas[i];
+        if (!atual) { atual = linha("", m.linha ? m.linha + i : null, "nova"); b.codigo.append(atual); pos = 0; }
+        const n = Math.min(resta, texto.length - pos);
+        pos += n;
+        resta -= Math.max(1, n);
+        pintarCodigo(atual.lastChild, texto, pos);
+        if (pos >= texto.length) { atual.classList.add("feita"); atual = null; i++; }
+      }
+      b.codigo.scrollTop = b.codigo.scrollHeight;
+      if (i < m.novas.length) { requestAnimationFrame(passo); return; }
+      if (m.cortado) b.codigo.append(el("div", { class: "bolha-linha mais" }, el("span", { class: "bolha-num" }), el("span", { class: "bolha-txt", text: `… mais ${m.mais - m.novas.length} linhas (clique para ver tudo)` })));
+      b.codigo.scrollTop = b.codigo.scrollHeight;
+      setTimeout(() => this.proximaNaBolha(c), 450);
+    };
+    requestAnimationFrame(passo);
+  }
+}
+
+// ---------------------------------------------------------------- cores leves para a bolha (sem o Monaco)
+
+const PALAVRAS = new Set(("const let var function return if else for while do switch case break continue class extends new import from export default " +
+  "async await try catch finally throw def elif lambda in of not and or is with yield pass raise None True False null undefined true false this self " +
+  "public private protected static void int string bool interface type enum struct fn pub use mod impl match package func go defer " +
+  "select where join on group by order insert into update set delete create table values as distinct limit").split(" "));
+const TOKEN = /(\/\/.*$|\/\*.*?(?:\*\/|$)|<!--.*?(?:-->|$)|#\s.*$|^\s*#(?!\w*\s*[{(:]).*$|--\s.*$)|("(?:[^"\\]|\\.)*"?|'(?:[^'\\]|\\.)*'?|`(?:[^`\\]|\\.)*`?)|(\b\d[\d_.xXa-fA-F]*\b)|([A-Za-z_$][\w$]*)(?=\s*\()|([A-Za-z_$][\w$]*)/g;
+
+/** Pinta uma linha de código até a letra `ate` (a digitação): comentários, textos, números, palavras-chave, funções. */
+function pintarCodigo(alvo, texto, ate) {
+  const visivel = texto.slice(0, ate);
+  const filhos = [];
+  let ultimo = 0;
+  for (const m of texto.matchAll(TOKEN)) {
+    if (m.index >= visivel.length) break;
+    if (m.index > ultimo) filhos.push(document.createTextNode(visivel.slice(ultimo, m.index)));
+    const parte = visivel.slice(m.index, m.index + m[0].length);
+    const classe = m[1] ? "tk-c" : m[2] ? "tk-s" : m[3] ? "tk-n" : m[4] ? (PALAVRAS.has(m[4].toLowerCase()) ? "tk-k" : "tk-f") : PALAVRAS.has(m[5].toLowerCase()) ? "tk-k" : null;
+    filhos.push(classe ? el("span", { class: classe, text: parte }) : document.createTextNode(parte));
+    ultimo = m.index + parte.length;
+  }
+  if (ultimo < visivel.length) filhos.push(document.createTextNode(visivel.slice(ultimo)));
+  alvo.replaceChildren(...filhos);
+  return alvo;
 }
