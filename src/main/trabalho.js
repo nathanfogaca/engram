@@ -117,7 +117,7 @@ class Trabalho {
     const a = this.estado(sessao);
     if (++a.janelas > 1) return this.info(sessao);
     a.desde = Date.now();
-    // o nome completo da pasta: com nome curto do Windows (NATHAN~1.FOG) o fs.watch derruba o processo inteiro
+    // o nome completo da pasta: com nome curto do Windows (FULANO~1.XYZ) o fs.watch derruba o processo inteiro
     let pasta = this.pastaDe(sessao);
     try { pasta = fs.realpathSync.native(pasta); } catch { pasta = null; }
     // a pasta do usuário ou a raiz do disco têm programas gravando o tempo todo: não dá para vigiar

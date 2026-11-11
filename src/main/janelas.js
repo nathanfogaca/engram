@@ -624,12 +624,18 @@ class Janelas {
       if (a.ganchos) this.verificarPergunta(id, j); else this.estadoPelaTela(id, j, a);
       try { this.olharPergunta(id, j, a); } catch { /* tela estranha: fica para a próxima volta */ }
       if (!j.conversa) j.conversa = this.acharConversa(id, j);
+      else if (j.conversa.endsWith('.zst')) {
+        // conversa compactada pelo Codex: se ele voltar a escrever, passa a valer a aberta (.jsonl)
+        const aberta = this.acharConversa(id, j);
+        if (aberta && aberta !== j.conversa) { j.conversa = aberta; j.conversaTam = -1; j.conversaLida = undefined; j.conversaTrocou = true; }
+      }
       if (j.conversa) {
         let tam = j.conversaTam;
         try { tam = fs.statSync(j.conversa).size; } catch { /* some e volta */ }
         if (tam !== j.conversaTam) {
           j.conversaTam = tam;
-          this.avisar({ tipo: 'conversa', sessao_id: id, tam });
+          this.avisar({ tipo: 'conversa', sessao_id: id, tam, ...(j.conversaTrocou ? { trocou: true } : {}) });
+          j.conversaTrocou = false;
           try { this.lerFerramentas(id, j); } catch { /* linha estranha: fica para a próxima */ }
         }
       }
@@ -1224,7 +1230,7 @@ class Janelas {
    * a retomada, só do ponto em que o Engram a encontrou.
    */
   lerFerramentas(id, j) {
-    if (j.provedor !== 'codex' || !j.conversa) return;
+    if (j.provedor !== 'codex' || !j.conversa || j.conversa.endsWith('.zst')) return; // a compactada não muda
     if (j.conversaLida === undefined) {
       let tam = 0;
       try { tam = fs.statSync(j.conversa).size; } catch { /* ainda não existe */ }

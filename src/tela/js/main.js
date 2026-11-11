@@ -327,8 +327,9 @@ function tratar(m) {
     api("/api/contas").then(atualizarProvedores).catch(() => {});
     if (contas?.dlg.open) contas.mudou();
   } else if (m.tipo === "conversa") {
-    palco.cartoes.get(m.sessao_id)?.conv.atualizar();
-    leitor.atualizar(m.sessao_id);
+    const conv = palco.cartoes.get(m.sessao_id)?.conv;
+    if (m.trocou) conv?.recarregar(); else conv?.atualizar();
+    leitor.atualizar(m.sessao_id, !!m.trocou);
   } else if (m.tipo === "arquivos") {
     const c = palco.cartoes.get(m.sessao_id);
     c?.conv.arquivosMudaram(m.entregues);

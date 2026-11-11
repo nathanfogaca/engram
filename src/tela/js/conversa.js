@@ -212,6 +212,12 @@ export class Conversa {
     if (this.pendente) { this.pendente = false; this.atualizar(); }
   }
 
+  /** O arquivo da conversa mudou (o Codex voltou a escrever numa conversa que estava compactada): lê do começo. */
+  recarregar() {
+    this.carregado = false;
+    return this.atualizar();
+  }
+
   async atualizar() {
     if (!this.carregado) return this.carregar();
     if (this.carregando) { this.pendente = true; return; }
@@ -489,8 +495,8 @@ export class Leitor {
     $("#leitor-abas").replaceChildren(...abas);
   }
 
-  atualizar(id) {
-    if (this.aberto && this.id === id) this.conv?.atualizar();
+  atualizar(id, trocou = false) {
+    if (this.aberto && this.id === id) trocou ? this.conv?.recarregar() : this.conv?.atualizar();
   }
 
   arquivos(id, novos) {

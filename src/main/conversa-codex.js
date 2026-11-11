@@ -5,11 +5,12 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const { textoUsuario, resumoEntrada } = require('./conversa');
 
 const SESSOES = () => path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions');
 const ID = /^[0-9a-f-]{36}$/;
-const ID_NO_NOME = /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
+const ID_NO_NOME = /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/;
 const CONTEXTO = /^\s*<(environment_context|user_instructions|permissions instructions|collaboration_mode|skills_instructions|apps_instructions)\b/;
 
 function pastasDoDia(dias) {
@@ -21,19 +22,27 @@ function pastasDoDia(dias) {
   return saida;
 }
 
+// o Codex compacta as conversas antigas (.jsonl.zst): vale a aberta (.jsonl) quando houver as duas
+function daConversa(pasta, externo) {
+  let nomes;
+  try { nomes = fs.readdirSync(pasta); } catch { return null; }
+  const a = nomes.find(n => n.endsWith(`-${externo}.jsonl`)) || nomes.find(n => n.endsWith(`-${externo}.jsonl.zst`));
+  return a ? path.join(pasta, a) : null;
+}
+
 /** Acha o arquivo pela id do Codex (thread) em qualquer dia. */
 function acharPorExterno(externo) {
   if (!ID.test(externo || '')) return null;
   for (const dia of pastasDoDia(3)) {
-    try { const a = fs.readdirSync(dia).find(n => n.endsWith(`-${externo}.jsonl`)); if (a) return path.join(dia, a); } catch { /* sem pasta */ }
+    const p = daConversa(dia, externo);
+    if (p) return p;
   }
   try {
     for (const ano of fs.readdirSync(SESSOES()).sort().reverse()) {
       for (const mes of fs.readdirSync(path.join(SESSOES(), ano)).sort().reverse()) {
         for (const dia of fs.readdirSync(path.join(SESSOES(), ano, mes)).sort().reverse()) {
-          const pasta = path.join(SESSOES(), ano, mes, dia);
-          const a = fs.readdirSync(pasta).find(n => n.endsWith(`-${externo}.jsonl`));
-          if (a) return path.join(pasta, a);
+          const p = daConversa(path.join(SESSOES(), ano, mes, dia), externo);
+          if (p) return p;
         }
       }
     }
@@ -67,16 +76,31 @@ function externoDoCaminho(caminho) {
   return m ? m[1] : null;
 }
 
-function ler(caminho, desde = 0, ultimos = null) {
-  let dados;
+let compactada = { caminho: null, data: 0, dados: null }; // a última .zst aberta (a vista Conversa relê a mesma)
+
+/** Os bytes da conversa a partir de `desde` (contados no texto, mesmo na compactada); null = não deu para ler. */
+function bytesDe(caminho, desde, maximo = Infinity) {
   try {
+    if (caminho.endsWith('.zst')) {
+      if (typeof zlib.zstdDecompressSync !== 'function') return null;
+      const data = fs.statSync(caminho).mtimeMs;
+      if (compactada.caminho !== caminho || compactada.data !== data) compactada = { caminho, data, dados: zlib.zstdDecompressSync(fs.readFileSync(caminho)) };
+      const d = compactada.dados;
+      return d.subarray(Math.min(desde, d.length), Math.min(d.length, desde + maximo));
+    }
     const fd = fs.openSync(caminho, 'r');
-    const tam = fs.fstatSync(fd).size;
-    const n = Math.max(0, tam - desde);
-    dados = Buffer.alloc(n);
-    fs.readSync(fd, dados, 0, n, desde);
-    fs.closeSync(fd);
-  } catch { return { itens: [], ate: desde }; }
+    try {
+      const n = Math.max(0, Math.min(fs.fstatSync(fd).size - desde, maximo));
+      const dados = Buffer.alloc(n);
+      fs.readSync(fd, dados, 0, n, desde);
+      return dados;
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+}
+
+function ler(caminho, desde = 0, ultimos = null) {
+  const dados = bytesDe(caminho, desde);
+  if (!dados) return { itens: [], ate: desde };
   const fim = dados.lastIndexOf(0x0a);
   if (fim < 0) return { itens: [], ate: desde };
   let itens = [];
@@ -96,14 +120,8 @@ function ler(caminho, desde = 0, ultimos = null) {
  * string (código do "exec", argumentos em JSON) e os caminhos estão com barras dobradas.
  */
 function chamadas(caminho, desde = 0) {
-  let dados;
-  try {
-    const fd = fs.openSync(caminho, 'r');
-    const n = Math.max(0, Math.min(fs.fstatSync(fd).size - desde, 8 << 20));
-    dados = Buffer.alloc(n);
-    fs.readSync(fd, dados, 0, n, desde);
-    fs.closeSync(fd);
-  } catch { return { itens: [], ate: desde }; }
+  const dados = bytesDe(caminho, desde, 8 << 20);
+  if (!dados) return { itens: [], ate: desde };
   const fim = dados.lastIndexOf(0x0a);
   if (fim < 0) return { itens: [], ate: desde };
   const itens = [];

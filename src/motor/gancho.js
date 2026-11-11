@@ -8,13 +8,17 @@ const http = require('node:http');
 const CAMPOS = ['caminho', 'pasta', 'sistema', 'id', 'tabela', 'termo', 'file_path', 'path', 'pattern',
   'description', 'command', 'url', 'subagent_type', 'para', 'nome'];
 
+const CAMINHOS = new Set(['caminho', 'pasta', 'file_path', 'path']);
+
 function curto(entrada) {
   const saida = {};
   if (entrada && typeof entrada === 'object') {
     for (const c of CAMPOS) {
       const v = entrada[c];
-      // o comando vai mais inteiro: o Engram procura nele as notas do cérebro que o agente abriu ou gravou
-      if (['string', 'number'].includes(typeof v)) saida[c] = String(v).slice(0, c === 'command' ? 4000 : 200);
+      // o comando vai mais inteiro (o Engram procura nele as notas que o agente abriu ou gravou), e o caminho também:
+      // no Windows ele passa fácil de 200 letras, e cortado ele aponta para outro arquivo
+      const max = c === 'command' ? 4000 : CAMINHOS.has(c) ? 1000 : 200;
+      if (['string', 'number'].includes(typeof v)) saida[c] = String(v).slice(0, max);
     }
   }
   return saida;

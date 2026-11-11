@@ -289,8 +289,20 @@ function criarBandeja() {
 app.on('second-instance', mostrar);
 app.on('before-quit', () => { saindo = true; });
 
+// sem o menu padrão do Electron: escondido, ele abria com o Alt (e roubava a tecla seguinte) e trazia atalhos
+// perigosos aqui, como o Ctrl+R que recarrega a tela no meio do trabalho. Fica só o Ctrl+Shift+I (ferramentas).
+app.on('web-contents-created', (_, wc) => {
+  wc.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && input.control && input.shift && !input.alt && String(input.key).toLowerCase() === 'i') {
+      e.preventDefault();
+      wc.toggleDevTools();
+    }
+  });
+});
+
 app.whenReady().then(async () => {
   app.setAppUserModelId('app.engram.desktop');
+  Menu.setApplicationMenu(null);
   registrarProtocolo();
   registrarIpc();
   try { criarBandeja(); } catch (e) { config.registrar(`bandeja: ${e.message}`); }
