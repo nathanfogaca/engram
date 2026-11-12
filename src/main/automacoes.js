@@ -182,9 +182,18 @@ class Automacoes {
     const cab = motivo === 'botão' ? 'rodada pedida agora pela pessoa' : quandoCurto(marcada);
     const setor = this.janelas.cerebro.setorDe(a.alvo);
     const doSetor = setor?.instrucao ? `\n\n(Você está no setor ${setor.nome} do palco. Instrução do setor: ${setor.instrucao})` : '';
-    const atraso = motivo === 'atrasada' ? ` Era para ${quandoCurto(marcada)}, mas o Engram estava fechado nessa hora: ela roda agora.` : '';
+    const atraso = motivo === 'atrasada' ? ` Era para ${quandoCurto(marcada)}, mas o Engram não estava rodando nessa hora (app fechado ou computador desligado): ela roda agora.` : '';
     const instrucao = a.instrucao || '(A automação está sem orientação. Pergunte à pessoa o que fazer, devolvendo a pergunta pelo enviar.)';
     return `[Engram · automação "${a.nome}" · ${cab}]\n${instrucao}${doSetor}\n\n(Esta tarefa vem de uma automação que a pessoa deixou no palco, ligada a você.${atraso} Quando terminar, devolva o resultado com mcp__engram__enviar para="${a.nome}": é o que a pessoa lê no cartão da automação. Se distribuir o trabalho para colegas, espere as respostas deles e devolva uma vez só, com tudo junto.)`;
+  }
+
+  /** A orientação que ficou na fila quando o app fechou, de novo no formato dela (null se a automação saiu). */
+  refazerMensagem(id) {
+    const a = this.pegar(id);
+    if (!a) return null;
+    const r = this.rodadaAberta(id);
+    const marcada = r?.marcada ? new Date(r.marcada) : null;
+    return this.mensagem(a, marcada ? r.motivo : 'botão', marcada);
   }
 
   /** A automação ligada a este agente com esse nome (para onde o enviar leva a devolutiva). */
@@ -230,7 +239,7 @@ class Automacoes {
       if (agoraD - marcada <= TOLERANCIA) this.rodar(a.id, 'horário', marcada);
       else if (a.perdida === 'rodar') this.rodar(a.id, 'atrasada', marcada);
       else {
-        this.registrar(a, { marcada: chave, motivo: 'atrasada', estado: 'pulou', resumo: `o Engram estava fechado ${quandoCurto(marcada)}`, fim: true });
+        this.registrar(a, { marcada: chave, motivo: 'atrasada', estado: 'pulou', resumo: `o Engram não estava rodando ${quandoCurto(marcada)}`, fim: true });
         this.avisarRodada(a);
       }
     }

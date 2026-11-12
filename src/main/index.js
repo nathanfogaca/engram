@@ -53,10 +53,12 @@ function avisar(msg) {
 }
 
 // Aviso do Windows (das automações). Guardados até sumirem: sem referência, o clique pode se perder.
+// Só no Engram instalado: fora dele, o Electron cria um atalho "Electron" no Menu Iniciar para conseguir
+// mostrar o aviso, e esse atalho toma o ícone do Engram na barra de tarefas.
 const notificacoes = new Set();
 function notificar({ titulo, texto, automacao }) {
   try {
-    if (!Notification.isSupported()) return;
+    if (!app.isPackaged || !Notification.isSupported()) return;
     const n = new Notification({ title: titulo, body: String(texto || '').slice(0, 240), icon: path.join(TELA, 'marca', 'engram.png') });
     notificacoes.add(n);
     const soltar = () => notificacoes.delete(n);
@@ -91,6 +93,8 @@ async function iniciarNucleo() {
   const codigo = new Codigo({ cfg, salvarConfig: config.salvar, avisar, janelas, provedores, registrar: config.registrar });
   const fluxos = new Fluxos({ codigo, janelas, provedores, avisar, cfg, registrar: config.registrar });
   janelas.fluxos = fluxos; // as ferramentas fluxo_* do time (MCP) falam com ele
+  // antes do time voltar do motor: as orientações que ficaram na fila são recolocadas no formato delas
+  const automacoes = new Automacoes({ db, janelas, avisar, notificar });
   const extensoes = new Extensoes({ dados: c.dados, cfg, salvarConfig: config.salvar, avisar, registrar: config.registrar });
   const previa = new Previa({ codigo, arquivos: janelas.arquivos, avisar, registrar: config.registrar });
   try { await previa.iniciar(); } catch (e) { config.registrar(`prévias: o servidor local não abriu (${e.message})`); }
@@ -127,7 +131,6 @@ async function iniciarNucleo() {
   fonte.observar(() => sincronizar());
   setInterval(() => { try { janelas.vigiar(); } catch { /* segue */ } }, 700);
   // o relógio das automações; a primeira volta espera o time voltar do motor (as atrasadas vão para ele)
-  const automacoes = new Automacoes({ db, janelas, avisar, notificar });
   const vigiarAutomacoes = () => { try { automacoes.vigiar(); } catch (e) { config.registrar(`automações: ${e.message}`); } };
   setTimeout(() => { vigiarAutomacoes(); setInterval(vigiarAutomacoes, 15_000); }, 30_000);
 
@@ -321,7 +324,9 @@ app.on('web-contents-created', (_, wc) => {
 });
 
 app.whenReady().then(async () => {
-  app.setAppUserModelId('app.engram.desktop');
+  // A identidade do app no Windows (barra de tarefas, avisos) é só do Engram instalado. Uma cópia de
+  // desenvolvimento ou de teste com a mesma identidade leva o ícone do Electron para a barra do instalado.
+  app.setAppUserModelId(app.isPackaged ? 'app.engram.desktop' : 'app.engram.desktop.dev');
   Menu.setApplicationMenu(null);
   registrarProtocolo();
   registrarIpc();

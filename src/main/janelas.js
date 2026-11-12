@@ -151,7 +151,13 @@ class Janelas {
   recolocarMensagens() {
     for (const m of this.cerebro.mensagensPendentes()) {
       const j = this.ativas.get(m.para);
-      if (j && !j.caixa.some(([n]) => n === m.n)) j.caixa.push([m.n, m.de, this.revisorAtivo(m.de) === m.para ? this.paraRevisao(m.de, m.para, m.texto) : this.formatar(m.de, m.texto, m.para)]);
+      if (!j || j.caixa.some(([n]) => n === m.n)) continue;
+      // a orientação de uma automação volta com o formato dela (e some se a automação saiu do palco)
+      const daAutomacao = String(m.de).startsWith('auto:');
+      const texto = daAutomacao ? this.automacoes?.refazerMensagem(m.de.slice(5))
+        : this.revisorAtivo(m.de) === m.para ? this.paraRevisao(m.de, m.para, m.texto) : this.formatar(m.de, m.texto, m.para);
+      if (!texto) { this.cerebro.mensagemEntregue(m.n); continue; }
+      j.caixa.push([m.n, m.de, texto]);
     }
     for (const j of this.ativas.values()) this.tentarEntregar(j, 1000);
   }
