@@ -18,14 +18,15 @@ const EXEMPLOS = [
 ];
 
 export class Gaveta {
-  constructor({ aoRetomar, aoFocarAgente, notaExiste }) {
+  constructor({ aoRetomar, aoFocarAgente, notaExiste, nomePalco = () => null }) {
     this.raiz = $("#gaveta");
+    this.nomePalco = nomePalco; // número do palco → nome (a lista do Time mostra de qual palco é cada janela)
     this.aoRetomar = aoRetomar;
     this.aoFocarAgente = aoFocarAgente;
     this.notaExiste = notaExiste;
     this.aba = "nota";
     this.notaAberta = null;
-    this.md = window.markdownit({ html: false, linkify: false, breaks: false });
+    this.md = window.markdownit({ html: false, linkify: false, breaks: false }).disable("image"); // sem imagens: nota de cérebro pode vir de fora
     for (const b of $$("#gaveta-abas button")) b.onclick = () => this.mostrar(b.dataset.aba);
     $("#gaveta-fechar").onclick = () => this.fechar();
     $("#exemplos").replaceChildren(...EXEMPLOS.map(([nome, sql]) =>
@@ -188,10 +189,10 @@ export class Gaveta {
           el("b", { text: s.nome }),
           el("span", { class: `tag${s.papel === "maestro" ? " maestro" : ""}`, text: s.papel === "maestro" ? "♛ Maestro" : nomePapel(s.papel) }),
           el("span", { class: "chip empurra", text: aberta ? s.estado : "encerrada" })),
-        el("div", { class: "det", text: `${nomeModelo(s.modelo, s.provedor)} · aberta ${dataHora(s.criada)}` }),
+        el("div", { class: "det", text: `${nomeModelo(s.modelo, s.provedor)} · aberta ${dataHora(s.criada)}${aberta && Number.isInteger(s.palco) && this.nomePalco(s.palco) ? ` · ${this.nomePalco(s.palco)}` : ""}` }),
         el("div", { class: "linha" },
           aberta ? el("button", { class: "btn pequeno", text: "Ver no palco", onclick: () => this.aoFocarAgente(s.id) }) : null,
-          !aberta ? el("button", { class: "btn-brilho pequeno", onclick: () => this.aoRetomar(s) }, el("span", { text: "Retomar" })) : null,
+          !aberta ? el("button", { class: "btn-brilho pequeno", title: `Retoma neste palco (${this.nomePalco(this.palcoAtual?.()) || "o atual"})`, onclick: () => this.aoRetomar(s) }, el("span", { text: "Retomar" })) : null,
           el("button", { class: "btn pequeno", text: "Atividade", onclick: ev => this.atividade(s, ev.target.closest(".membro")) })));
       return card;
     };

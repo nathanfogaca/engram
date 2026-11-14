@@ -49,6 +49,18 @@ export class Setores {
     this.atualizarMembros(false);
   }
 
+  /** Troca de palco: os setores do palco que sai saem da tela. */
+  limpar() {
+    this.resolver?.(null);
+    this.resolver = null;
+    this.pop.hidden = true;
+    if (this.modo) this.alternarModo(false);
+    this.selecao.clear();
+    this.posicionarAgrupar();
+    for (const s of this.lista.values()) s.el.remove();
+    this.lista.clear();
+  }
+
   /** Um setor criado ou mudado (pela tela ou pelo app): cria ou atualiza no lugar. */
   receber(dados, nascendo = true) {
     let s = this.lista.get(dados.id);
@@ -166,7 +178,7 @@ export class Setores {
   }
 
   async criar(dados) {
-    try { this.receber(await api("/api/setores", { json: dados })); }
+    try { this.receber(await api("/api/setores", { json: { ...dados, palco: this.palco.n } })); }
     catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); }
   }
 

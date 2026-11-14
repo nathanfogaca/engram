@@ -29,6 +29,11 @@ const { Previa } = require('./previa');
 const { Linguagens } = require('./linguagens');
 const { Trabalho } = require('./trabalho');
 const { Automacoes } = require('./automacoes');
+const { TrocaDeCerebro } = require('./troca-cerebro');
+const { Tarefas } = require('./tarefas');
+const { Diario } = require('./diario');
+const { Cenas } = require('./cenas');
+const { Uso } = require('./uso');
 
 const TELA = path.resolve(__dirname, '..', 'tela');
 const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json', '.wasm': 'application/wasm', '.woff': 'font/woff', '.otf': 'font/otf' };
@@ -87,14 +92,30 @@ async function iniciarNucleo() {
   }
   try { fonte.preparar(); } catch (e) { config.registrar(`cérebro: ${e.message}`); }
   const cerebro = new Cerebro(cfg, db, c.banco, fonte);
+  // o índice no banco pode ser de outra fonte (a pessoa trocou e fechou o app): volta o da fonte em uso
+  try { cerebro.alinharIndice(fonte.chave); } catch (e) { config.registrar(`cérebro: índice (${e.message})`); }
+  cerebro.sessoesSemCerebroPrompt(fonte.chave);
   const skills = new Skills({ dados: c.dados, registrar: config.registrar });
   skills.sincronizar(); // plugin do Claude e pastas do Engram no Codex, conforme a biblioteca
   const janelas = new Janelas({ cfg, cerebro, fonte, token, caminhos: c, avisar, provedores, mcps, skills });
+  // a fonte do cérebro (pasta neste computador ou servidor) troca na hora, pelo palco
+  const trocaCerebro = new TrocaDeCerebro({
+    cfg, cerebro, janelas, mcps, avisar, fonte, pastaPadrao: c.cerebro,
+    salvarCerebro: config.salvarCerebro, sincronizar: () => sincronizar(), registrar: config.registrar,
+  });
   const codigo = new Codigo({ cfg, salvarConfig: config.salvar, avisar, janelas, provedores, registrar: config.registrar });
   const fluxos = new Fluxos({ codigo, janelas, provedores, avisar, cfg, registrar: config.registrar });
   janelas.fluxos = fluxos; // as ferramentas fluxo_* do time (MCP) falam com ele
   // antes do time voltar do motor: as orientações que ficaram na fila são recolocadas no formato delas
-  const automacoes = new Automacoes({ db, janelas, avisar, notificar });
+  // o diário do palco no cérebro (uma linha por delegação e devolutiva) e o quadro de tarefas do maestro
+  const diario = new Diario({ cfg, fonte, cerebro, avisar });
+  trocaCerebro.aoTrocar.push(nova => { diario.descarregar(); diario.fonte = nova; diario.parado = null; });
+  app.on('before-quit', () => { try { diario.descarregar(); } catch { /* segue */ } });
+  const tarefas = new Tarefas({ db, janelas, avisar, diario });
+  const automacoes = new Automacoes({ db, janelas, avisar, notificar, diario });
+  // Lote 3: cenas (o desenho do time guardado para recriar) e o medidor de uso de cada agente
+  const cenas = new Cenas({ db, cfg, janelas, automacoes, avisar });
+  janelas.uso = new Uso(cfg);
   const extensoes = new Extensoes({ dados: c.dados, cfg, salvarConfig: config.salvar, avisar, registrar: config.registrar });
   const previa = new Previa({ codigo, arquivos: janelas.arquivos, avisar, registrar: config.registrar });
   try { await previa.iniciar(); } catch (e) { config.registrar(`prévias: o servidor local não abriu (${e.message})`); }
@@ -102,20 +123,32 @@ async function iniciarNucleo() {
   app.on('before-quit', () => linguagens.pararTudo());
   const trabalho = new Trabalho({ janelas, avisar });
   const estadoSinc = { rodando: false, ultimo: null, erro: null };
+  // leitura longa do cérebro (a primeira vez no servidor): a tela mostra o progresso e a constelação vai crescendo
+  cerebro.aoProgresso = p => { estadoSinc.progresso = p; progressoDe = cerebro.fonte; avisar({ tipo: 'sinc', rodando: true, progresso: p }); avisar({ tipo: 'cerebro', mudou: null, progresso: true }); };
 
+  let fonteDaSinc = null, progressoDe = null;
   async function sincronizar(forcar = false) {
+    const fonteAgora = cerebro.fonte;
+    fonteDaSinc = fonteAgora;
     estadoSinc.rodando = true;
-    avisar({ tipo: 'sinc', rodando: true });
+    // uma leitura longa já em andamento (a mesma fonte): o aviso leva o último progresso, para o topo não voltar a 'sincronizando…'
+    if (progressoDe !== fonteAgora) estadoSinc.progresso = null; // o progresso guardado era da fonte de antes
+    avisar({ tipo: 'sinc', rodando: true, ...(estadoSinc.progresso ? { progresso: estadoSinc.progresso } : {}) });
     let resultado;
+    const refazer = cerebro.indiceVelho(fonteAgora.chave); // índice de servidor de uma versão antiga: relê tudo uma vez
     try {
-      resultado = await cerebro.sincronizar(forcar);
+      resultado = await cerebro.sincronizar(forcar || refazer);
+      if (refazer && resultado?.forcada && !resultado.cancelada && cerebro.fonte === fonteAgora) cerebro.marcarIndiceNovo(fonteAgora.chave);
+      // a fonte trocou no meio: esta leitura parou sem gravar, e quem conta é a da fonte nova
+      if (resultado?.cancelada || cerebro.fonte !== fonteAgora) return resultado;
       Object.assign(estadoSinc, { ultimo: resultado, erro: null });
     } catch (e) {
+      if (cerebro.fonte !== fonteAgora) return { erro: e.message, cancelada: true };
       estadoSinc.erro = e.message;
       resultado = { erro: e.message };
     }
-    estadoSinc.rodando = false;
-    avisar({ tipo: 'sinc', rodando: false, resultado });
+    if (fonteDaSinc === fonteAgora) { estadoSinc.rodando = false; estadoSinc.progresso = null; }
+    avisar({ tipo: 'sinc', rodando: estadoSinc.rodando, resultado });
     return resultado;
   }
 
@@ -128,7 +161,7 @@ async function iniciarNucleo() {
 
   sincronizar();
   setInterval(() => sincronizar(), Math.max(1, cfg.cerebro.sincronizar_min) * 60_000);
-  fonte.observar(() => sincronizar());
+  trocaCerebro.vigiar();
   setInterval(() => { try { janelas.vigiar(); } catch { /* segue */ } }, 700);
   // o relógio das automações; a primeira volta espera o time voltar do motor (as atrasadas vão para ele)
   const vigiarAutomacoes = () => { try { automacoes.vigiar(); } catch (e) { config.registrar(`automações: ${e.message}`); } };
@@ -150,7 +183,7 @@ async function iniciarNucleo() {
     try { janela.setTitleBarOverlay({ color: t.fundo, symbolColor: t.simbolos, height: 40 }); } catch { /* sem barra */ }
   };
   definirTema(cfg.tema);
-  const rotas = criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, abrirTrabalho: sessao => abrirJanelaTrabalho(sessao, trabalho) });
+  const rotas = criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, abrirTrabalho: sessao => abrirJanelaTrabalho(sessao, trabalho) });
   return { cfg, janelas, rotas, extensoes, arquivos: new Arquivos(c.arquivos) };
 }
 

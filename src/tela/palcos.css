@@ -1,0 +1,130 @@
+/* Palcos (até 3, no menu Ferramentas), a troca de palco e o seletor de onde vem o cérebro (Servidor | Local). */
+
+/* ------------------------------------------------------------------ selo (palco com agente esperando você) */
+.selo {
+  flex: none; min-width: 9px; height: 9px; border-radius: 9px; background: var(--ambar); color: #1a1205; font: 700 9.5px/9px var(--mono); text-align: center;
+  box-shadow: 0 0 0 0 rgb(255 200 87 / .7), 0 0 10px rgb(255 200 87 / .9); animation: selo-pulsa 1.6s ease-out infinite;
+}
+.selo[hidden] { display: none; }
+.selo.terminou { background: var(--verde); box-shadow: 0 0 0 0 rgb(74 222 159 / .7), 0 0 10px rgb(74 222 159 / .9); animation-name: selo-pulsa-verde; }
+.selo.com-n { height: 15px; min-width: 15px; padding: 0 4px; line-height: 15px; }
+.selo.nasce { animation: selo-nasce .5s var(--mola), selo-pulsa 1.6s .5s ease-out infinite; }
+.selo.terminou.nasce { animation: selo-nasce .5s var(--mola), selo-pulsa-verde 1.6s .5s ease-out infinite; }
+@keyframes selo-pulsa { 70% { box-shadow: 0 0 0 7px rgb(255 200 87 / 0), 0 0 10px rgb(255 200 87 / .9); } 100% { box-shadow: 0 0 0 0 rgb(255 200 87 / 0), 0 0 10px rgb(255 200 87 / .9); } }
+@keyframes selo-pulsa-verde { 70% { box-shadow: 0 0 0 7px rgb(74 222 159 / 0), 0 0 10px rgb(74 222 159 / .9); } 100% { box-shadow: 0 0 0 0 rgb(74 222 159 / 0), 0 0 10px rgb(74 222 159 / .9); } }
+@keyframes selo-nasce { from { transform: scale(0); } 60% { transform: scale(1.5); } }
+
+/* chip com o nome do palco atual, no botão Ferramentas */
+.ferr-palco { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 11px var(--mono); color: rgb(var(--acento2)); padding: 1px 7px; border-radius: 7px; background: rgb(var(--acento2) / .12); border: 1px solid rgb(var(--acento2) / .3); }
+.ferr-palco:empty { display: none; }
+.ferr-palco.pisca { animation: ferr-palco-pisca .7s var(--mola); }
+@keyframes ferr-palco-pisca { 40% { background: rgb(var(--acento2) / .5); box-shadow: 0 0 16px rgb(var(--acento2) / .8); transform: scale(1.08); } }
+
+/* ------------------------------------------------------------------ item "Palcos" no menu */
+.ferr-ico-palcos { gap: 2px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 7px; }
+.ferr-ico-palcos i { width: 5px; border-radius: 2px; background: rgb(var(--acento2)); box-shadow: 0 0 8px rgb(var(--acento2) / .6); opacity: .5; }
+.ferr-ico-palcos i:nth-child(1) { height: 9px; } .ferr-ico-palcos i:nth-child(2) { height: 14px; opacity: 1; } .ferr-ico-palcos i:nth-child(3) { height: 11px; }
+#btn-palcos .seta-palcos { color: var(--discreto); font-size: 11px; transition: transform .25s var(--mola); }
+#btn-palcos[aria-expanded="true"] .seta-palcos { transform: rotate(180deg); }
+.palcos-lista { display: flex; flex-direction: column; gap: 3px; padding: 2px 4px 6px 12px; margin-left: 14px; border-left: 1px dashed var(--borda-forte); overflow: hidden; }
+.palcos-lista[hidden] { display: none; }
+.palcos-lista.abre { animation: palcos-abre .32s var(--suave); }
+@keyframes palcos-abre { from { opacity: 0; max-height: 0; } to { opacity: 1; max-height: 220px; } }
+
+.palco-linha {
+  position: relative; display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 11px; cursor: pointer; overflow: hidden;
+  border: 1px solid transparent; background: rgb(var(--tinta) / .03); transition: background .18s, border-color .25s, box-shadow .3s;
+}
+.palco-linha:hover { background: rgb(var(--tinta) / .08); }
+.palco-linha.atual { background: rgb(var(--acento2) / .15); border-color: rgb(var(--acento2) / .55); box-shadow: 0 0 20px -4px rgb(var(--acento2) / .55), inset 0 0 18px -8px rgb(var(--acento2) / .6); cursor: default; }
+.palco-linha.atual::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 40%, rgb(var(--acento2) / .22) 50%, transparent 60%); background-size: 260% 100%; animation: palco-brilha 4.5s linear infinite; pointer-events: none; }
+@keyframes palco-brilha { from { background-position: 130% 0; } to { background-position: -130% 0; } }
+.palco-num { flex: none; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; font: 700 11.5px var(--mono); color: var(--discreto); background: rgb(var(--tinta) / .06); border: 1px solid var(--borda); }
+.palco-linha.atual .palco-num { color: #06121a; background: rgb(var(--acento2)); border-color: transparent; box-shadow: 0 0 12px rgb(var(--acento2) / .8); }
+.palco-nome { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.palco-nome b { font-weight: 650; color: var(--texto-forte); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palco-nome small { font-size: 11px; color: var(--discreto); }
+.palco-nome input { width: 100%; font: inherit; font-weight: 650; color: var(--texto-forte); background: rgb(0 0 0 / .35); border: 1px solid rgb(var(--acento2) / .7); border-radius: 7px; padding: 2px 6px; outline: none; box-shadow: 0 0 12px rgb(var(--acento2) / .35); }
+.palco-lapis { flex: none; border: 0; background: none; color: var(--discreto); cursor: pointer; border-radius: 7px; padding: 3px 5px; opacity: 0; transition: opacity .15s, color .15s; }
+.palco-linha:hover .palco-lapis, .palco-lapis:focus-visible { opacity: 1; }
+.palco-lapis:hover { color: var(--texto-forte); background: rgb(var(--tinta) / .1); }
+.palco-ag { flex: none; display: flex; gap: 3px; align-items: center; }
+.palco-ag i { width: 6px; height: 6px; border-radius: 50%; background: var(--apagado); }
+.palco-ag i.ocupado { background: var(--ciano); box-shadow: 0 0 6px var(--ciano); animation: respirar 1.2s ease-in-out infinite; }
+.palco-ag i.atencao { background: var(--ambar); box-shadow: 0 0 7px var(--ambar); }
+.palco-ag i.livre { background: var(--verde); box-shadow: 0 0 5px var(--verde); }
+
+/* ------------------------------------------------------------------ a troca de palco */
+.palco-troca-saindo #setores, .palco-troca-saindo #fios, .palco-troca-saindo #cartoes, .palco-troca-saindo #lembrancas {
+  transition: translate .24s cubic-bezier(.5, 0, .9, .4), opacity .22s ease-in, filter .22s ease-in;
+  translate: calc(var(--dir, 1) * -90px) 0; opacity: 0; filter: blur(5px);
+}
+.palco-troca-entrando #setores, .palco-troca-entrando #fios, .palco-troca-entrando #cartoes, .palco-troca-entrando #lembrancas {
+  animation: palco-entra .5s var(--suave) both;
+}
+@keyframes palco-entra { from { translate: calc(var(--dir, 1) * 110px) 0; opacity: 0; filter: blur(6px); } }
+
+.palco-varrido { position: absolute; inset: 0; z-index: 40; pointer-events: none; overflow: hidden; display: none; }
+.palco-varrido.on { display: block; }
+.palco-varrido::before {
+  content: ""; position: absolute; top: -10%; bottom: -10%; width: 38%; left: -45%;
+  background: linear-gradient(100deg, transparent, rgb(var(--acento2) / .10) 30%, rgb(var(--acento1) / .34) 50%, rgb(var(--acento2) / .10) 70%, transparent);
+  filter: blur(6px); transform: skewX(-12deg);
+}
+.palco-varrido.on[data-dir="1"]::before { animation: varrido-d .75s var(--suave) both; }
+.palco-varrido.on[data-dir="-1"]::before { animation: varrido-e .75s var(--suave) both; }
+@keyframes varrido-d { to { left: 115%; } }
+@keyframes varrido-e { from { left: 115%; } to { left: -45%; } }
+.palco-varrido b {
+  position: absolute; left: 50%; top: 42%; translate: -50% -50%; font: 800 clamp(40px, 8vw, 110px)/1 var(--mono); letter-spacing: -.02em; white-space: nowrap;
+  color: rgb(var(--acento2) / .0); -webkit-text-stroke: 1px rgb(var(--acento2) / .5); text-shadow: 0 0 40px rgb(var(--acento2) / .5);
+}
+.palco-varrido.on b { animation: varrido-nome .95s var(--suave) both; }
+@keyframes varrido-nome { 0% { opacity: 0; scale: .9; filter: blur(8px); } 30% { opacity: .9; scale: 1; filter: blur(0); } 100% { opacity: 0; scale: 1.06; filter: blur(4px); } }
+
+/* ------------------------------------------------------------------ cérebro: Servidor | Local */
+.fonte { position: relative; display: flex; align-items: center; height: 36px; padding: 3px; border-radius: 12px; background: rgb(var(--tinta) / .05); border: 1px solid var(--borda); }
+.fonte-pilula {
+  position: absolute; top: 3px; bottom: 3px; left: 3px; width: 0; border-radius: 9px; pointer-events: none; opacity: 0;
+  background: linear-gradient(135deg, rgb(var(--acento1) / .42), rgb(var(--acento2) / .3)); border: 1px solid rgb(var(--acento2) / .55);
+  box-shadow: 0 0 18px -2px rgb(var(--acento2) / .6); transition: left .38s var(--mola), width .38s var(--mola), opacity .2s;
+}
+.fonte.pronta .fonte-pilula { opacity: 1; }
+.fonte.trocando .fonte-pilula { animation: fonte-pulsa .7s ease-in-out infinite; }
+@keyframes fonte-pulsa { 50% { box-shadow: 0 0 30px 2px rgb(var(--acento2) / .95); filter: brightness(1.35); } }
+.fonte-op {
+  position: relative; z-index: 1; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 9px; background: none; cursor: pointer;
+  color: var(--discreto); font: 600 12.5px var(--sans, inherit); white-space: nowrap; transition: color .25s;
+}
+.fonte-op:hover { color: var(--texto); }
+.fonte-op.ativo { color: var(--texto-forte); }
+.fonte-op.apagado { opacity: .38; cursor: not-allowed; }
+.fonte-op.apagado:hover { color: var(--discreto); }
+.fonte.trocando .fonte-op { cursor: progress; }
+.fonte-ponto { width: 7px; height: 7px; border-radius: 50%; background: var(--apagado); transition: background .3s, box-shadow .3s; }
+.fonte-op.ativo .fonte-ponto { background: var(--verde); box-shadow: 0 0 8px var(--verde); }
+.fonte.trocando .fonte-op.alvo .fonte-ponto { background: var(--ciano); box-shadow: 0 0 10px var(--ciano); animation: respirar .6s ease-in-out infinite; }
+.fonte-nome { max-width: 110px; overflow: hidden; text-overflow: ellipsis; color: var(--discreto); font-weight: 500; }
+.fonte-nome:empty { display: none; }
+.fonte.erro { animation: fonte-erro .45s; }
+@keyframes fonte-erro { 20%, 60% { translate: -4px 0; } 40%, 80% { translate: 4px 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .selo, .palco-linha.atual::after, .fonte.trocando .fonte-pilula, .palco-varrido::before { animation: none !important; }
+  .palco-troca-saindo #setores, .palco-troca-saindo #fios, .palco-troca-saindo #cartoes, .palco-troca-saindo #lembrancas { transition: none; }
+  .palco-troca-entrando #setores, .palco-troca-entrando #fios, .palco-troca-entrando #cartoes, .palco-troca-entrando #lembrancas { animation: none; }
+}
+
+/* Ajustes > Geral > Cérebro: o seletor "Em uso agora" enquanto troca (a classe vem do geral.js) */
+.aj-seg button.trocando { position: relative; animation: fonte-pulsa-aj .7s ease-in-out infinite; }
+@keyframes fonte-pulsa-aj { 50% { box-shadow: 0 0 26px 1px rgb(var(--acento2) / .9); filter: brightness(1.3); } }
+@media (prefers-reduced-motion: reduce) { .aj-seg button.trocando { animation: none; box-shadow: 0 0 16px rgb(var(--acento2) / .8); } }
+
+/* sinc longa: barrinha de progresso no botão ("lendo 120 de 440") */
+.sinc { position: relative; overflow: hidden; }
+.sinc.rodando::after { content: ""; position: absolute; left: 10px; bottom: 3px; height: 2px; width: calc(var(--prog, 0%) * .86); max-width: calc(100% - 20px); border-radius: 2px;
+  background: linear-gradient(90deg, rgb(var(--acento1)), var(--ciano)); box-shadow: 0 0 8px var(--ciano); transition: width .6s var(--suave); }
+
+/* o menu Ferramentas nunca passa do topo da janela (com uma folha de baixo aberta ele sobe junto com a barra e rola por dentro) */
+.ferramentas-menu { max-height: calc(100vh - 130px); overflow-y: auto; scrollbar-width: thin; }
+body.folha-aberta .ferramentas-menu { max-height: calc(48vh - 130px); }

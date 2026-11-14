@@ -34,7 +34,7 @@ para confirmar que recebeu, e não responda a uma resposta que não pede nada.
 const PAPEIS = {
   maestro: {
     nome: 'Maestro', resumo: 'Rege o time: divide o pedido, delega e junta os resultados',
-    prompt: 'Seu papel nesta janela: MAESTRO, quem rege o time. Entenda o pedido, divida em tarefas e delegue com mcp__engram__enviar para os colegas ligados a você (veja papéis e modelos com mcp__engram__equipe). ANTES de delegar, confira se o pedido combina com quem vai receber: se a pessoa citar um sistema ou assunto que não é daquele colega, diga isso e pergunte, ou mande para quem cuida do assunto explicando por quê. Se um colega responder que aquilo não existe no lado dele, não encerre: ofereça perguntar a quem cuida do assunto certo. Acompanhe com mcp__engram__ver_tela quando precisar, junte os resultados e responda. Se faltar alguém, crie com mcp__engram__criar_agente (modelo leve para tarefa simples, forte para análise difícil). Para montar o time no palco, mcp__engram__ligar e mcp__engram__desligar põem e tiram linhas entre os colegas (o equipe mostra com quem cada um fala e quem está no palco sem ligação com você); só arrume os cartões com mcp__engram__organizar_palco quando a pessoa pedir. Se o palco tiver setores (áreas como MKT ou Dev, listadas em equipe), mande cada tarefa para quem é do setor certo, e crie agente novo já no setor dele. Quando a pessoa pedir setores, crie você mesmo com mcp__engram__criar_setor (e mude com editar_setor ou remover_setor), em vez de pedir que ela desenhe. Prefira coordenar a fazer o trabalho dos outros.',
+    prompt: 'Seu papel nesta janela: MAESTRO, quem rege o time. Entenda o pedido, divida em tarefas e delegue com mcp__engram__enviar para os colegas ligados a você (veja papéis e modelos com mcp__engram__equipe). ANTES de delegar, confira se o pedido combina com quem vai receber: se a pessoa citar um sistema ou assunto que não é daquele colega, diga isso e pergunte, ou mande para quem cuida do assunto explicando por quê. Se um colega responder que aquilo não existe no lado dele, não encerre: ofereça perguntar a quem cuida do assunto certo. Acompanhe com mcp__engram__ver_tela quando precisar, junte os resultados e responda. Se faltar alguém, crie com mcp__engram__criar_agente (modelo leve para tarefa simples, forte para análise difícil). Para montar o time no palco, mcp__engram__ligar e mcp__engram__desligar põem e tiram linhas entre os colegas (o equipe mostra com quem cada um fala e quem está no palco sem ligação com você); só arrume os cartões com mcp__engram__organizar_palco quando a pessoa pedir. Se o palco tiver setores (áreas como MKT ou Dev, listadas em equipe), mande cada tarefa para quem é do setor certo, e crie agente novo já no setor dele. Para mandar a mesma tarefa a um setor inteiro, use enviar com para = o nome do setor; contexto longo vai num arquivo, em arquivos (o Engram copia para a pasta de cada um). Para saber onde está cada cartão antes de mexer no palco, use mcp__engram__palco. O que você delega fica no seu quadro: mcp__engram__tarefas mostra o que já voltou e o que ainda falta; marque como entregue o que já conferiu. Quando a pessoa pedir setores, crie você mesmo com mcp__engram__criar_setor (e mude com editar_setor ou remover_setor), em vez de pedir que ela desenhe. Prefira coordenar a fazer o trabalho dos outros.',
   },
   livre: { nome: 'Livre', resumo: 'Um agente completo, sem papel definido', prompt: '' },
   revisor: {
@@ -64,7 +64,7 @@ const TEMAS = {
 const PADRAO = {
   porta: 8870, // servidor local das ferramentas do time (MCP) e dos ganchos; a tela usa IPC
   motor_porta: 0, // 0 = porta + 9
-  max_janelas: 8,
+  max_janelas: 24,
   max_mensagens_par_10min: 30,
   max_arquivo_mb: 100,
   pasta_trabalho: '', // vazio = pasta do usuário
@@ -123,6 +123,17 @@ function salvar(parcial) {
   fs.writeFileSync(c.config, JSON.stringify(novo, null, 2), 'utf8');
 }
 
+/**
+ * Grava só os campos dados do bloco do cérebro, mantendo os outros: a pasta e o servidor ficam guardados juntos,
+ * e trocar a fonte ativa (fonte: 'pasta' | 'remoto') não apaga a configuração da outra.
+ */
+function salvarCerebro(parcial) {
+  const c = caminhos();
+  let salvo = {};
+  try { salvo = JSON.parse(fs.readFileSync(c.config, 'utf8').replace(/^\uFEFF/, '')); } catch { /* novo */ }
+  salvar({ cerebro: { ...(salvo.cerebro || {}), ...parcial } });
+}
+
 function tokenLocal() {
   const c = caminhos();
   try {
@@ -139,4 +150,4 @@ function registrar(texto) {
   try { fs.appendFileSync(caminhos().log, `${new Date().toISOString()} ${texto}\n`, 'utf8'); } catch { /* sem log */ }
 }
 
-module.exports = { RAIZ, PROMPT_BASE, PAPEIS, TEMAS, carregar, salvar, caminhos, tokenLocal, registrar };
+module.exports = { RAIZ, PROMPT_BASE, PAPEIS, TEMAS, carregar, salvar, salvarCerebro, caminhos, tokenLocal, registrar };

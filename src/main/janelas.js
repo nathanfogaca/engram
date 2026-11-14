@@ -12,6 +12,7 @@ const conversa = require('./conversa');
 const conversaCodex = require('./conversa-codex');
 const { idDoCaminho } = require('./notas');
 const { TelaVirtual } = require('./tela-virtual');
+const { PALCOS } = require('./banco');
 
 const EVENTOS_GANCHO = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop', 'Notification', 'SessionEnd'];
 const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando', PreToolUse: 'trabalhando', PostToolUse: 'pensando', Stop: 'esperando você', Notification: 'precisa de você' };
@@ -20,12 +21,19 @@ const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
 const { lerPergunta, TECLAS, TRABALHANDO } = require('./pergunta');
 const { notasDoComando, analisarCodex, resolver, trechosDoPatch, desescapar } = require('./notas-tocadas'); // linhas do cérebro e bolha do palco
 const OCUPADO_ESTADO = new Set(['pensando', 'trabalhando']);
-const FERRAMENTAS_TIME = ['equipe', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
+const FERRAMENTAS_TIME = ['equipe', 'palco', 'tarefas', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
 // as cores dos setores, as mesmas da tela (src/tela/js/setores.js)
 const CORES_SETOR = { violeta: '#8b7bff', ciano: '#38d6f5', magenta: '#e879f9', ambar: '#ffc857', verde: '#4ade9f', coral: '#ff7a6b' };
 const PESSOA = 'pessoa'; // remetente das mensagens que a pessoa digita na vista Conversa
 const MAX_BUFFER = 400_000;
 const TAMANHO_PADRAO = [700, 470];
+// o tamanho dos outros objetos do palco (src/tela/automacoes.css); a altura deles varia, então é aproximada
+const TAMANHO_AUTOMACAO = [300, 170], TAMANHO_POSTIT = [210, 160];
+const ETIQUETA_SETOR = 70; // a etiqueta com o nome do setor fica em cima da área
+const MAX_ANEXOS = 20;
+const MONTAR_TELA = 3000; // depois do SessionStart (ou de confiar na pasta), quanto esperar antes de colar
+const CONFIRMAR = 8000; // sem UserPromptSubmit nesse tempo depois de colar, a entrega é conferida na tela
+const ONDE_MUDAR_LIMITE = 'Ajustes > Geral > Limites, "Janelas abertas ao mesmo tempo"';
 const COLAR_INICIO = '\x1b[200~', COLAR_FIM = '\x1b[201~';
 const VARIAVEIS_FORA = new Set(['CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_CODE_EXECPATH', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_SESSION_ATTENDED',
@@ -55,7 +63,11 @@ class Janela {
     this.arquivosAssinatura = '';
     this.criadaEm = Date.now();
     this.pergunta = null; // o agente está esperando uma resposta no terminal (confiar na pasta, etc.)
+    this.ultimaAcao = null; // agentes sem ganchos: a última ferramenta, lida da conversa ({ o_que, quando })
   }
+  // o estado guarda desde quando vale (o equipe mostra "trabalhando há 3 min")
+  get estado() { return this._estado; }
+  set estado(v) { if (v !== this._estado) { this._estado = v; this.estadoDesde = Date.now(); } }
   escrever(texto) { if (this.viva) this.motor.mandar('escrever', { id: this.id, dados: texto }); }
   guardar(texto) {
     this.saida.push(texto);
@@ -95,6 +107,7 @@ class Janelas {
     this.escreverGanchos();
     await this.motor.conectar();
     await this.reconciliar();
+    try { this.cerebro.posicoesLimpar(); } catch { /* fica para a próxima */ }
   }
 
   escreverGanchos() {
@@ -122,15 +135,21 @@ class Janelas {
       else if (s.manter) retomar.push(s);
       else if (!s.encerrada) this.cerebro.sessaoEncerrar(s.id);
     }
+    const ondeParou = [], doZero = [], falhas = [];
     for (const s of retomar) {
       try {
         const r = await this.abrir({ nome: s.nome, modelo: s.modelo, papel: s.papel, provedor: s.provedor || 'claude', retomar: s.id });
-        this.avisar({ tipo: 'aviso', texto: r.conversa_nova ? `${s.nome} foi reaberto (não tinha conversa gravada, então começou uma nova)` : `${s.nome} foi reaberto onde parou` });
+        (r.conversa_nova ? doZero : ondeParou).push(s.nome);
       } catch (e) {
         this.cerebro.sessaoEncerrar(s.id);
-        this.avisar({ tipo: 'aviso', texto: `não deu para reabrir ${s.nome}: ${e.message}` });
+        falhas.push(`${s.nome} (${String(e.message).slice(0, 80)})`);
       }
     }
+    // um aviso por grupo (com o time inteiro reaberto, um por agente empilhava em cima dos cartões)
+    const juntar = nomes => (nomes.length > 4 ? `${nomes.slice(0, 4).join(', ')} e mais ${nomes.length - 4}` : nomes.join(', '));
+    if (ondeParou.length) this.avisar({ tipo: 'aviso', texto: ondeParou.length === 1 ? `${ondeParou[0]} foi reaberto onde parou` : `${ondeParou.length} agentes foram reabertos onde pararam: ${juntar(ondeParou)}` });
+    if (doZero.length) this.avisar({ tipo: 'aviso', texto: doZero.length === 1 ? `${doZero[0]} foi reaberto (não tinha conversa gravada, então começou uma nova)` : `${doZero.length} agentes foram reabertos com conversa nova (não tinham conversa gravada): ${juntar(doZero)}` });
+    if (falhas.length) this.avisar({ tipo: 'aviso', texto: `não deu para reabrir ${juntar(falhas)}` });
     this.recolocarMensagens();
   }
 
@@ -188,21 +207,23 @@ class Janelas {
     s.aberta = this.ativas.has(id);
     if (s.aberta) { s.estado = this.ativas.get(id).estado; s.pergunta = this.ativas.get(id).pergunta; }
     s.provedor = s.provedor || 'claude';
+    s.palco = s.palco || 1;
     s.agente = this.provedores.adaptador(s.provedor)?.nome || s.provedor;
     s.nome_modelo = this.provedores.nomeModelo(s.provedor, s.modelo);
     s.tem_conversa = ['claude', 'codex'].includes(s.provedor);
+    s.uso = this.uso?.resumo(id) || null; // tokens da conversa e de hoje (o chip do cartão)
     s.mcps = s.mcps ? JSON.parse(s.mcps) : null;
     return s;
   }
 
-  async abrir({ nome, modelo = '', papel = 'livre', provedor = 'claude', retomar = null, posicao = null, ligarA = null, tarefa = null, mcps = undefined }) {
+  async abrir({ nome, modelo = '', papel = 'livre', provedor = 'claude', retomar = null, posicao = null, ligarA = null, tarefa = null, mcps = undefined, palco = null }) {
     nome = String(nome || '').replace(/[\x00-\x1f\x7f"]/g, '').trim().slice(0, 40) || 'agente';
     const adaptador = this.provedores.adaptador(provedor);
     if (!adaptador) throw new Error('agente desconhecido');
     modelo = String(modelo || '').trim();
     if (!this.provedores.modeloValido(provedor, modelo)) throw new Error('nome de modelo inválido');
-    if (!this.cfg.papeis[papel]) throw new Error('papel desconhecido');
-    if (this.ativas.size >= this.cfg.max_janelas) throw new Error(`já há ${this.ativas.size} janelas abertas (máximo ${this.cfg.max_janelas})`);
+    if (!Object.hasOwn(this.cfg.papeis, String(papel))) throw new Error('papel desconhecido');
+    if (this.ativas.size >= this.cfg.max_janelas) throw new Error(`o Engram está no limite de ${this.cfg.max_janelas} janelas abertas ao mesmo tempo (abertas agora: ${this.ativas.size}). Para mudar o número: ${ONDE_MUDAR_LIMITE}`);
     if (retomar !== null) {
       if (!/^[0-9a-f-]{36}$/.test(retomar) || !this.cerebro.sessao(retomar)) throw new Error('sessão para retomar não encontrada');
       if (this.ativas.has(retomar)) throw new Error('essa sessão já está aberta');
@@ -238,7 +259,7 @@ class Janelas {
     const listaMcps = this.mcps ? await this.mcps.paraJanela(provedor, escolhidos) : [];
     const montado = adaptador.montar({
       id, nome, modelo, prompt, arqPrompt, retomar: continuar, externo: anterior?.externo || null,
-      pastas: [pastaArquivos, ...(this.fonte.tipo === 'pasta' ? [this.fonte.pasta] : [])],
+      pastas: [pastaArquivos, ...this.pastasDoCerebro()],
       mcpUrl: `http://127.0.0.1:${this.cfg.porta}/mcp`, token: this.token, dirJanelas: this.caminhos.janelas,
       arquivoGanchos: this.arquivoGanchos, runtime: this.motor.runtime, chave: await this.provedores.chaveParaJanela(provedor),
       mcps: listaMcps, soEngram: !!this.mcps?.estado.so_engram, pluginSkills: this.skills?.pluginParaClaude() || null,
@@ -256,12 +277,25 @@ class Janelas {
     j.pasta = cwd;
     j.conversaNova = !continuar; // conversa que começa agora: as linhas do cérebro valem desde o início dela
     this.ativas.set(id, j);
-    this.cerebro.sessaoCriar(id, nome, provedor, modelo, papel, cwd);
+    // o palco do cartão: o de quem o criou (o maestro), o que a tela pediu, o da janela retomada ou o que a tela mostra
+    const noPalco = ligarA && this.cerebro.sessao(ligarA) ? this.cerebro.palcoDe(ligarA) : palcoValido(palco) || anterior?.palco || this.cerebro.palcoAtual();
+    const mudouDePalco = !!anterior && (anterior.palco || 1) !== noPalco;
+    this.cerebro.sessaoCriar(id, nome, provedor, modelo, papel, cwd, noPalco);
+    this.cerebro.sessaoCerebroPrompt(id, this.fonte.chave); // o prompt que acabou de ser escrito descreve a fonte em uso
     // conversa nova: o nome dela é o deste prompt; retomada: continua o nome com que ela começou
     if (!continuar || !anterior?.nome_prompt) this.cerebro.sessaoNomePrompt(id, nome);
     if (mcps !== undefined) this.cerebro.sessaoMcps(id, escolhidos);
+    const antiga = mudouDePalco ? null : this.cerebro.posicao(id); // retomada em outro palco: o lugar antigo era do outro
     if (posicao) this.cerebro.posicaoSalvar(id, ...posicaoValida(posicao));
-    else if (!this.cerebro.posicao(id)) this.cerebro.posicaoSalvar(id, ...this.lugarLivre(ligarA));
+    else if (!antiga) this.cerebro.posicaoSalvar(id, ...this.lugarLivre(ligarA, { proprio: id, palco: noPalco }));
+    else if (this.sobrepoe(antiga, id)) {
+      // retomada: enquanto ela estava encerrada, outro cartão ocupou o lugar dela. Vai para o lugar livre mais
+      // perto; se estava num setor, para outro lugar dentro dele (continua no setor)
+      const setor = this.cerebro.setorDe(id);
+      const p = setor ? this.lugarNoSetor(setor, id) : null;
+      if (p) this.cerebro.posicaoSalvar(id, p.x, p.y, p.w, p.h);
+      else this.cerebro.posicaoSalvar(id, ...this.lugarLivre(null, { proprio: id, w: antiga.w, h: antiga.h, perto: antiga, palco: noPalco }));
+    }
     if (ligarA && this.ativas.has(ligarA)) this.cerebro.conectar(ligarA, id);
     if (tarefa) this.enfileirar(j, tarefa[0], tarefa[1]);
     const info = this.info(id);
@@ -282,16 +316,92 @@ class Janelas {
     }
   }
 
-  lugarLivre(pertoDe) {
-    const [w, h] = TAMANHO_PADRAO;
-    const ocupados = [...this.ativas.keys()].map(i => this.cerebro.posicao(i)).filter(Boolean);
-    const base = pertoDe ? this.cerebro.posicao(pertoDe) : null;
-    const candidatos = base
+  /**
+   * O que já ocupa lugar num palco: os cartões ABERTOS dele (janela encerrada não ocupa: a posição dela fica
+   * guardada só para quando for retomada), os setores com a etiqueta em cima, as automações e os post-its.
+   * `ignorar`: ids de cartões ou de setores que não contam (os que estão sendo mudados de lugar).
+   */
+  ocupados({ ignorar = [], setores = true, extras = true, palco } = {}) {
+    if (!palco) throw new Error('ocupados: diga de qual palco'); // sem padrão: o palco da tela não é o do agente
+    const fora = new Set(ignorar);
+    const r = [];
+    for (const id of this.ativas.keys()) {
+      if (fora.has(id) || this.cerebro.palcoDe(id) !== palco) continue;
+      const p = this.cerebro.posicao(id);
+      if (p) r.push({ x: p.x, y: p.y, w: p.w, h: p.h, tipo: 'cartao', id });
+    }
+    if (setores) for (const s of this.cerebro.setores(palco)) if (!fora.has(s.id)) r.push({ x: s.x, y: s.y - ETIQUETA_SETOR, w: s.w, h: s.h + ETIQUETA_SETOR, tipo: 'setor', id: s.id });
+    if (extras && this.automacoes) {
+      for (const a of this.automacoes.todas(palco)) r.push({ x: a.x, y: a.y, w: TAMANHO_AUTOMACAO[0], h: TAMANHO_AUTOMACAO[1], tipo: 'automacao' });
+      for (const p of this.automacoes.postits(palco)) r.push({ x: p.x, y: p.y, w: TAMANHO_POSTIT[0], h: TAMANHO_POSTIT[1], tipo: 'postit' });
+    }
+    return r;
+  }
+
+  /** A posição guardada deste cartão bate em outro cartão aberto (ou numa automação ou post-it)? */
+  sobrepoe(p, id) {
+    return this.ocupados({ ignorar: [id], setores: false, palco: this.cerebro.palcoDe(id) }).some(o => toca(p, o, 0));
+  }
+
+  /**
+   * Lugar livre para um cartão novo: ao lado de `pertoDe` (o maestro que o criou) ou de `perto` (a posição
+   * antiga de quem foi retomado), sem encostar em cartão aberto, setor, automação ou post-it. Sem âncora,
+   * perto do meio do time.
+   */
+  lugarLivre(pertoDe, { proprio = null, w = TAMANHO_PADRAO[0], h = TAMANHO_PADRAO[1], perto = null, palco = null } = {}) {
+    palco ??= pertoDe ? this.cerebro.palcoDe(pertoDe) : proprio ? this.cerebro.palcoDe(proprio) : this.cerebro.palcoAtual();
+    const ocupados = this.ocupados({ ignorar: proprio ? [proprio] : [], palco });
+    const base = perto || (pertoDe ? this.cerebro.posicao(pertoDe) : null);
+    const preferidos = base && !perto
       ? [[base.x + base.w + 140, base.y], [base.x + base.w + 140, base.y + h + 80], [base.x + base.w + 140, base.y - h - 80], [base.x, base.y + base.h + 120]]
-      : [0, 1, 2, 3].flatMap(l => [0, 1, 2, 3].map(c => [c * (w + 140), l * (h + 120)]));
-    for (const [x, y] of candidatos) if (!ocupados.some(p => Math.abs(x - p.x) < w && Math.abs(y - p.y) < h)) return [x, y, w, h];
-    const [x, y] = candidatos[candidatos.length - 1];
-    return [x + 60, y + 60, w, h];
+      : [];
+    const cartoes = ocupados.filter(o => o.tipo === 'cartao');
+    const ancora = base ? centro(base) : cartoes.length ? centro(caixaDe(cartoes)) : { x: w / 2, y: h / 2 };
+    return [...acharLugar(w, h, ancora, ocupados, { preferidos }), w, h];
+  }
+
+  // ---------------------------------------------------------------- palcos
+  // Cada janela é de um palco. As ferramentas do maestro valem para o palco dele, e uma linha só liga cartões do
+  // mesmo palco. Os nomes são únicos entre as janelas abertas de todos os palcos (assim ninguém fala com o errado).
+
+  abertasNoPalco(palco) { return [...this.ativas.keys()].filter(id => this.cerebro.palcoDe(id) === palco); }
+
+  /** Uma janela aberta deste palco, pelo nome ou id (null se não há ou se está em outro palco). */
+  acharNoPalco(quem, palco) {
+    const id = this.achar(quem);
+    return id && this.cerebro.palcoDe(id) === palco ? id : null;
+  }
+
+  /** Por que o nome não serve neste palco: não existe ou está em outro palco. */
+  naoAchei(quem, palco) {
+    const id = this.achar(quem);
+    if (id) return `${this.nomeDe(id)} está em outro palco (${this.cerebro.palcoNome(this.cerebro.palcoDe(id))}). Você só fala e mexe com quem está no seu palco (${this.cerebro.palcoNome(palco)}).`;
+    return `Não há janela aberta chamada "${quem}". Veja os nomes com equipe.`;
+  }
+
+  /**
+   * A pasta local do cérebro entra sempre nas pastas que o agente lê e grava (--add-dir), mesmo com o cérebro no
+   * servidor: assim, se a pessoa trocar para o Local no meio da conversa, ele consegue gravar as notas lá.
+   */
+  pastasDoCerebro() {
+    const p = this.fonte.tipo === 'pasta' ? this.fonte.pasta : this.cfg.cerebro?.pasta;
+    if (!p) return [];
+    try { fs.mkdirSync(p, { recursive: true }); } catch { return []; }
+    return [p];
+  }
+
+  /**
+   * O prompt da conversa descreve o cérebro de quando ela começou (o --append-system-prompt só vale na abertura).
+   * Se a pessoa trocou a fonte depois, a próxima mensagem entregue leva o aviso, uma vez só.
+   */
+  avisoDeCerebro(id) {
+    const s = this.cerebro.sessao(id);
+    const chave = this.fonte.chave;
+    if (!s || s.cerebro_prompt === chave) return '';
+    this.cerebro.sessaoCerebroPrompt(id, chave);
+    if (!s.cerebro_prompt) return ''; // sem registro (não deveria acontecer): só anota
+    const onde = this.fonte.tipo === 'remoto' ? 'no servidor' : 'numa pasta deste computador';
+    return `\n\n(Aviso do Engram: a pessoa trocou o cérebro, que agora fica ${onde}. ${this.fonte.descricao()} Vale a partir desta mensagem: esqueça o que o começo da conversa dizia sobre onde ficam as notas. Se não conseguir ler ou gravar lá, avise a pessoa.)`;
   }
 
   fechar(id) {
@@ -400,6 +510,8 @@ class Janelas {
     j.guardar(texto);
     for (const cb of j.ouvintes) { cb(texto); cb(null); }
     this.cerebro.sessaoEncerrar(id); // saiu com o app rodando (/exit, ×): conta como encerrada
+    // a posição dela fica (dá para retomar pela gaveta); a de quem saiu do histórico, não
+    try { this.cerebro.posicoesLimpar(); } catch { /* fica para a próxima */ }
     this.avisar({ tipo: 'sessao', sessao: this.info(id) });
   }
 
@@ -464,6 +576,7 @@ class Janelas {
     j.pergunta = null;
     j.estado = 'iniciando';
     j.criadaEm = Date.now();
+    j.prontaEm = Date.now(); // depois de confiar, o CLI ainda carrega (MCPs, plugin): a entrega espera a tela montar
     this.avisar({ tipo: 'evento', sessao_id: id, evento: 'Pergunta', estado: 'iniciando', pergunta: null, toques: [] });
   }
 
@@ -627,7 +740,7 @@ class Janelas {
   vigiar() {
     for (const [id, j] of this.ativas) {
       const a = this.provedores.adaptador(j.provedor) || {};
-      if (a.ganchos) this.verificarPergunta(id, j); else this.estadoPelaTela(id, j, a);
+      if (a.ganchos) { this.verificarPergunta(id, j); this.conferirEntrega(id, j); } else this.estadoPelaTela(id, j, a);
       try { this.olharPergunta(id, j, a); } catch { /* tela estranha: fica para a próxima volta */ }
       if (!j.conversa) j.conversa = this.acharConversa(id, j);
       else if (j.conversa.endsWith('.zst')) {
@@ -640,6 +753,7 @@ class Janelas {
         try { tam = fs.statSync(j.conversa).size; } catch { /* some e volta */ }
         if (tam !== j.conversaTam) {
           j.conversaTam = tam;
+          this.medirUso(id, j);
           this.avisar({ tipo: 'conversa', sessao_id: id, tam, ...(j.conversaTrocou ? { trocou: true } : {}) });
           j.conversaTrocou = false;
           try { this.lerFerramentas(id, j); } catch { /* linha estranha: fica para a próxima */ }
@@ -653,6 +767,19 @@ class Janelas {
         this.avisar({ tipo: 'arquivos', sessao_id: id, entregues: novos });
       }
     }
+  }
+
+  /**
+   * O medidor de uso lê o que a conversa ganhou desde a última vez (tokens de entrada e saída, cache e custo
+   * estimado) e avisa a tela. Conversa maior que uma volta de leitura continua na volta seguinte.
+   */
+  medirUso(id, j) {
+    if (!this.uso || !j.conversa) return;
+    this.uso.atualizar(id, j.provedor, j.conversa).then(mudou => {
+      if (mudou) this.avisar({ tipo: 'uso', sessao_id: id, uso: this.uso.resumo(id) });
+      const e = this.uso.sessoes.get(id);
+      if (mudou && e && !j.conversa.endsWith('.zst') && e.lido < j.conversaTam) setTimeout(() => this.medirUso(id, j), 50);
+    }).catch(() => {});
   }
 
   // ---------------------------------------------------------------- time (usado pelo MCP)
@@ -680,25 +807,73 @@ class Janelas {
     return d;
   }
 
+  /** Quem mandou uma mensagem, do jeito que o agente entende: o nome do colega, "a pessoa" ou a automação. */
+  nomeRemetente(de) {
+    if (de === PESSOA) return 'a pessoa';
+    if (String(de).startsWith('auto:')) {
+      const a = this.automacoes?.pegar(String(de).slice(5));
+      return a ? `automação "${a.nome}"` : 'uma automação';
+    }
+    return this.cerebro.sessao(de)?.nome || 'um colega que já saiu';
+  }
+
+  /**
+   * O que um colega está fazendo, para o equipe: a tarefa (o começo da última mensagem que chegou a ele e quem
+   * mandou), há quanto tempo está nela ou parado, e a última ferramenta que usou.
+   */
+  fazendo(id) {
+    const j = this.ativas.get(id);
+    if (!j) return {};
+    const agora = Date.now();
+    const d = {};
+    if (j.estadoDesde) d.no_estado_ha = haQuanto(agora - j.estadoDesde);
+    const m = this.cerebro.ultimaRecebida(id);
+    if (m) {
+      // o assunto é o texto da pessoa ou do colega, sem o bloco dos anexos nem a nota do setor que o Engram põe no fim
+      const corpo = String(m.texto).split(FIM_DO_ENGRAM)[0];
+      const t = { de: this.nomeRemetente(m.de), assunto: assunto(corpo), ha: haQuanto(agora - new Date(m.entregue).getTime()) };
+      if (OCUPADO_ESTADO.has(j.estado) || j.estado === 'precisa de você') d.tarefa = t; else d.ultima_tarefa = t;
+    }
+    const acao = this.ultimaAcaoDe(id, j);
+    if (acao) d.ultima_acao = { o_que: acao.o_que, ha: haQuanto(agora - acao.quando) };
+    return d;
+  }
+
+  /** A última ferramenta: pelo gancho (Claude) ou pela conversa (Codex). Caminhos da pasta do agente ficam curtos. */
+  ultimaAcaoDe(id, j) {
+    const ev = this.cerebro.ultimoEvento(id, 'PreToolUse');
+    let acao = ev ? { o_que: ev.resumo || ev.ferramenta || '', quando: new Date(ev.quando).getTime() } : null;
+    if (j.ultimaAcao && (!acao || j.ultimaAcao.quando > acao.quando)) acao = { ...j.ultimaAcao };
+    if (!acao?.o_que) return null;
+    const pasta = String(j.pasta || '');
+    if (pasta.length > 3) {
+      const comBarra = pasta.replace(/[\\/]+$/, '') + path.sep;
+      acao.o_que = acao.o_que.split(comBarra).join('').split(comBarra.replace(/\\/g, '/')).join('');
+    }
+    acao.o_que = assunto(mascarar(acao.o_que), 140);
+    return acao;
+  }
+
   /** Os setores do palco com quem está em cada um (para o maestro distribuir o trabalho). */
-  setoresDoPalco() {
-    const setores = this.cerebro.setores();
+  setoresDoPalco(palco) {
+    const setores = this.cerebro.setores(palco);
     if (!setores.length) return null;
     const membros = new Map(setores.map(s => [s.id, []]));
-    for (const id of this.ativas.keys()) { const s = this.cerebro.setorDe(id, setores); if (s) membros.get(s.id).push(this.nomeDe(id)); }
+    for (const id of this.abertasNoPalco(palco)) { const s = this.cerebro.setorDe(id, setores); if (s) membros.get(s.id).push(this.nomeDe(id)); }
     return setores.map(s => ({ nome: s.nome, ...(s.instrucao ? { instrucao: s.instrucao } : {}), agentes: membros.get(s.id).sort() }));
   }
 
   /** Lugar livre para um cartão novo dentro do setor; se não couber, o setor cresce para baixo. */
-  lugarNoSetor(setor) {
+  lugarNoSetor(setor, proprio = null) {
     const [w, h] = TAMANHO_PADRAO, folga = 50;
-    const ocupados = [...this.ativas.keys()].map(i => this.cerebro.posicao(i)).filter(Boolean);
-    const livre = (x, y) => !ocupados.some(p => x < p.x + p.w + 30 && p.x < x + w + 30 && y < p.y + p.h + 30 && p.y < y + h + 30);
+    // cartões abertos, automações e post-its (encerrado não conta; `proprio` é o cartão que está procurando lugar)
+    const ocupados = this.ocupados({ ignorar: proprio ? [proprio] : [], setores: false, palco: setor.palco || 1 });
+    const livre = (x, y) => !ocupados.some(p => toca({ x, y, w, h }, p, 30));
     for (let y = setor.y + folga; y + h <= setor.y + setor.h - folga / 2; y += 60) {
       for (let x = setor.x + folga; x + w <= setor.x + setor.w - folga / 2; x += 60) if (livre(x, y)) return { x, y, w, h };
     }
     // não coube: abre espaço embaixo, sem cortar ninguém
-    const fundo = Math.max(setor.y + setor.h, ...ocupados.filter(p => p.x < setor.x + setor.w && p.x + p.w > setor.x && p.y < setor.y + setor.h).map(p => p.y + p.h));
+    const fundo = Math.max(setor.y + setor.h, ...ocupados.filter(p => p.tipo === 'cartao' && p.x < setor.x + setor.w && p.x + p.w > setor.x && p.y < setor.y + setor.h).map(p => p.y + p.h));
     const y = fundo + 40;
     const novo = { ...setor, w: Math.max(setor.w, w + 2 * folga), h: y + h + folga - setor.y };
     this.cerebro.setorSalvar(novo);
@@ -712,14 +887,20 @@ class Janelas {
   }
 
   equipe(id) {
-    const comLigacoes = c => ({ ...this.descricao(c), fala_com: this.falaCom(c) });
+    const comLigacoes = c => ({ ...this.descricao(c), ...this.fazendo(c), fala_com: this.falaCom(c) });
     const colegas = [...this.cerebro.conectados(id)].sort().filter(c => this.ativas.has(c)).map(comLigacoes);
     const r = { voce: this.descricao(id), colegas, sua_pasta_de_arquivos: this.arquivos.pasta(id) };
     if (this.cerebro.sessao(id)?.papel === 'maestro') {
+      const palco = this.cerebro.palcoDe(id);
+      const aqui = this.abertasNoPalco(palco);
+      r.seu_palco = `${this.cerebro.palcoNome(palco)}, com ${aqui.length} ${aqui.length === 1 ? 'janela aberta' : 'janelas abertas'}. Suas ferramentas valem só para este palco; quem você cria nasce nele.`;
+      r.janelas_abertas = `${this.ativas.size} de ${this.cfg.max_janelas}, somando todos os palcos (o limite é da pessoa, em ${ONDE_MUDAR_LIMITE})`;
+      r.mapa_do_palco = 'Para ver onde está cada cartão, setor, automação e post-it (x, y, largura, altura), use a ferramenta palco.';
       // o maestro enxerga o palco inteiro, para ligar quem ainda não está no time
-      const fora = [...this.ativas.keys()].filter(c => c !== id && !this.cerebro.conectados(id).has(c)).sort().map(comLigacoes);
+      const ligados = this.cerebro.conectados(id);
+      const fora = aqui.filter(c => c !== id && !ligados.has(c)).sort().map(comLigacoes);
       if (fora.length) r.no_palco_sem_ligacao_com_voce = fora;
-      const setores = this.setoresDoPalco();
+      const setores = this.setoresDoPalco(palco);
       if (setores) r.setores = { explicacao: 'Áreas que a pessoa desenhou no palco. Mande cada tarefa para quem é do setor certo; quem recebe já vê a instrução do setor dele.', lista: setores };
     }
     const meu = this.cerebro.setorDe(id);
@@ -731,6 +912,37 @@ class Janelas {
     const revisados = this.cerebro.revisados(id).filter(x => this.ativas.has(x)).map(x => this.cerebro.sessao(x).nome);
     if (revisados.length) r.voce_revisa_as_entregas_de = revisados;
     return r;
+  }
+
+  /** O mapa do palco para o maestro: onde está cada cartão aberto, setor, automação e post-it. */
+  palco(de) {
+    if (!this.ehMaestro(de)) return 'Só o maestro vê o mapa do palco.';
+    const r = n => Math.round(Number(n) || 0);
+    const palco = this.cerebro.palcoDe(de);
+    const setores = this.cerebro.setores(palco);
+    const membros = new Map(setores.map(s => [s.id, []]));
+    const abertas = this.abertasNoPalco(palco);
+    const cartoes = abertas.map(id => {
+      const p = this.cerebro.posicao(id) || { x: 0, y: 0, w: TAMANHO_PADRAO[0], h: TAMANHO_PADRAO[1] };
+      const s = this.cerebro.sessao(id) || {};
+      const c = { nome: s.nome, papel: this.cfg.papeis[s.papel]?.nome || s.papel, x: r(p.x), y: r(p.y), w: r(p.w), h: r(p.h) };
+      if (id === de) c.voce = true;
+      const st = this.cerebro.setorDe(id, setores);
+      if (st) { c.setor = st.nome; membros.get(st.id).push(s.nome); }
+      return c;
+    }).sort((a, b) => a.y - b.y || a.x - b.x);
+    const mapa = {
+      explicacao: 'Coordenadas em pixels do palco: x cresce para a direita e y para baixo; x, y é o canto de cima à esquerda e w, h a largura e a altura. Um agente faz parte de um setor quando o centro do cartão está dentro do retângulo do setor; a etiqueta com o nome do setor ocupa uns 70 px acima dele. Cartão novo nasce com 700 × 470. Janelas encerradas não aparecem (não ocupam lugar), nem o que está nos outros palcos. Para mover cartões, só quando a pessoa pedir, use organizar_palco no modo lista com estes mesmos x, y. Automações e post-its têm tamanho aproximado.',
+      palco: this.cerebro.palcoNome(palco),
+      janelas_abertas: `${abertas.length} neste palco; ${this.ativas.size} de ${this.cfg.max_janelas} somando todos os palcos`,
+      cartoes,
+      setores: setores.map(s => ({ nome: s.nome, cor: Object.keys(CORES_SETOR).find(k => CORES_SETOR[k] === s.cor) || s.cor, x: r(s.x), y: r(s.y), w: r(s.w), h: r(s.h), agentes: membros.get(s.id).sort() })),
+      automacoes: (this.automacoes?.todas(palco) || []).map(a => ({ nome: a.nome, x: r(a.x), y: r(a.y), w: TAMANHO_AUTOMACAO[0], h: TAMANHO_AUTOMACAO[1], ligada_a: a.alvo ? (this.ativas.has(a.alvo) ? this.nomeDe(a.alvo) : `${this.nomeDe(a.alvo)} (encerrado)`) : null })),
+      postits: (this.automacoes?.postits(palco) || []).map(p => ({ texto: assunto(p.texto, 80), x: r(p.x), y: r(p.y), w: TAMANHO_POSTIT[0], h: TAMANHO_POSTIT[1] })),
+    };
+    const tudo = [...mapa.cartoes, ...mapa.automacoes, ...mapa.postits, ...mapa.setores.map(s => ({ ...s, y: s.y - ETIQUETA_SETOR, h: s.h + ETIQUETA_SETOR }))];
+    if (tudo.length) { const c = caixaDe(tudo); mapa.area_ocupada = { x: r(c.x), y: r(c.y), w: r(c.w), h: r(c.h) }; }
+    return JSON.stringify(mapa, null, 2);
   }
 
   /** O revisor deste agente, se a ligação de revisão existe e ele está aberto. */
@@ -759,35 +971,171 @@ class Janelas {
     return partes.join('\n\n');
   }
 
-  enviar(de, para, texto) {
-    const alvo = this.achar(para);
+  /**
+   * Manda uma mensagem a um colega ligado, ou ao setor inteiro (para = o nome do setor: vai para cada membro
+   * ligado a quem envia). `arquivos`: caminhos que vão junto, copiados para a pasta recebidos/ de quem recebe.
+   */
+  enviar(de, para, texto, arquivos = []) {
+    texto = String(texto || '').trim();
+    const anexos = this.conferirAnexos(de, arquivos);
+    if (anexos.erro) return anexos.erro;
+    if (!texto && anexos.lista.length) texto = anexos.lista.length > 1 ? 'Seguem os arquivos.' : 'Segue o arquivo.';
+    const palco = this.cerebro.palcoDe(de);
+    const achado = this.achar(para);
+    const alvo = achado && this.cerebro.palcoDe(achado) === palco ? achado : null; // quem está em outro palco não é colega
     // a devolutiva de uma automação ligada a este agente (um colega ligado com o mesmo nome tem a preferência)
     const automacao = this.automacoes?.daJanela(de, para);
-    if (automacao && !(alvo && this.cerebro.conectados(de).has(alvo))) return this.automacoes.devolver(automacao, de, texto);
-    if (!alvo) return `Não há janela aberta chamada "${para}". Veja os nomes com equipe.`;
-    if (alvo === de) return 'Você não pode mandar mensagem para você mesmo.';
+    if (automacao && !(alvo && this.cerebro.conectados(de).has(alvo))) {
+      const citados = anexos.lista.length ? `\n\n[Arquivos citados]\n${anexos.lista.map(a => `- ${a}`).join('\n')}` : '';
+      return this.automacoes.devolver(automacao, de, texto + citados);
+    }
+    const setor = this.setorPorNome(para, palco);
+    if (!alvo) {
+      if (setor) return this.enviarAoSetor(de, setor, texto, anexos.lista);
+      if (achado) return this.naoAchei(para, palco);
+      return `Não há janela aberta (nem setor) chamada "${para}". Veja os nomes com equipe.`;
+    }
+    const r = this.entregarA(de, alvo, texto, anexos.lista).texto;
+    // um agente e um setor com o mesmo nome: o agente vence, mas quem mandou fica sabendo
+    return setor ? `${r} (Há também um setor chamado ${setor.nome}, mas a mensagem foi só para o agente. Para falar com o setor inteiro, peça à pessoa para mudar um dos dois nomes.)` : r;
+  }
+
+  setorPorNome(nome, palco) {
+    const n = String(nome || '').trim().toLowerCase();
+    return n ? this.cerebro.setores(palco).find(s => s.nome.toLowerCase() === n) || null : null;
+  }
+
+  /**
+   * Confere os arquivos antes de mandar qualquer coisa: { lista: caminhos absolutos } ou { erro }.
+   * O agente já lê esses arquivos com as próprias ferramentas; a trava é contra ele ser induzido (por um
+   * conteúdo hostil que leu) a passar adiante o que é do Engram ou um segredo, e contra encher o disco.
+   */
+  conferirAnexos(de, arquivos) {
+    const pedidos = (Array.isArray(arquivos) ? arquivos : arquivos ? [arquivos] : []).map(a => String(a ?? '').trim()).filter(Boolean);
+    if (pedidos.length > MAX_ANEXOS) return { erro: `Não mandei nada: são ${pedidos.length} arquivos, e o máximo é ${MAX_ANEXOS} por mensagem.` };
+    const base = this.ativas.get(de)?.pasta || this.cfg.pasta_trabalho || '';
+    const limite = this.cfg.max_arquivo_mb * 1048576;
+    const lista = [];
+    let soma = 0;
+    for (const a of pedidos) {
+      const abs = path.resolve(base, a); // caminho relativo vale a partir da pasta em que o agente roda
+      let st;
+      try { st = fs.statSync(abs); } catch { return { erro: `Não mandei nada: o arquivo ${abs} não existe.` }; }
+      if (!st.isFile()) return { erro: `Não mandei nada: ${abs} não é um arquivo.` };
+      // confere o caminho pedido e o de verdade (um atalho ou link pode apontar para a pasta de dados ou para .ssh)
+      const proibido = this.anexoProibido(abs) || this.anexoProibido(real(abs));
+      if (proibido) return { erro: `Não mandei nada: ${abs} ${proibido}.` };
+      if (lista.includes(abs)) continue;
+      soma += st.size;
+      if (soma > limite) return { erro: `Não mandei nada: os arquivos somam mais que ${this.cfg.max_arquivo_mb} MB (o limite de Ajustes vale para a mensagem inteira). Mande menos arquivos ou só o caminho deles no texto.` };
+      lista.push(abs);
+    }
+    return { lista };
+  }
+
+  /** Por que este arquivo não pode ir como anexo (ou null): os dados do próprio Engram e arquivos de segredo. */
+  anexoProibido(abs) {
+    const mesmo = (p, base) => { const r = path.relative(base, p); return !r || (!r.startsWith('..') && !path.isAbsolute(r)); };
+    const dados = real(this.caminhos.dados);
+    // a pasta de dados do Engram (banco, token, config) fica de fora; as pastas de arquivos dos agentes e o cérebro local, não
+    const liberadas = [this.caminhos.arquivos, this.caminhos.cerebro].filter(Boolean).map(real);
+    if (mesmo(abs, dados) && !liberadas.some(p => mesmo(abs, p))) return 'é da pasta de dados do Engram (banco, token, configuração) e não vai como anexo';
+    const nome = path.basename(abs).toLowerCase();
+    const partes = abs.toLowerCase().split(/[\\/]+/);
+    if (/^\.env(\..+)?$/.test(nome) || /\.(pem|key|pfx|p12|kdbx|ppk)$/.test(nome) || /^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/.test(nome)
+      || ['credentials', 'credentials.json', '.netrc', '.npmrc', '.pypirc', '.git-credentials'].includes(nome) || partes.includes('.ssh') || partes.includes('.aws')) {
+      return 'parece um arquivo de segredo (chave, senha ou token) e não vai como anexo; se for mesmo preciso, a pessoa anexa pela tela';
+    }
+    return null;
+  }
+
+  /** Copia os anexos para recebidos/ de quem recebe e devolve o bloco que vai no fim da mensagem. */
+  anexar(de, para, lista) {
+    if (!lista.length) return '';
+    const limite = this.cfg.max_arquivo_mb * 1048576;
+    const copias = [];
+    try {
+      for (const origem of lista) copias.push(this.arquivos.copiar(para, 'recebidos', origem, null, limite));
+    } catch (e) {
+      // não deixa meia entrega para trás: apaga as cópias que já tinham sido feitas
+      for (const c of copias) try { fs.unlinkSync(c); } catch { /* já saiu */ }
+      throw e;
+    }
+    this.avisar({ tipo: 'arquivos', sessao_id: para, entregues: [] });
+    return `\n\n[Arquivos que ${this.nomeDe(de)} anexou: estão na sua pasta recebidos/; leia antes de começar]\n${copias.map(c => `- ${c}`).join('\n')}`;
+  }
+
+  /** Uma mensagem para um colega: { ok, texto } (o texto é a resposta para quem enviou). `nota` vai antes dos anexos. */
+  entregarA(de, alvo, texto, anexos = [], nota = '', setor = null) {
+    if (alvo === de) return { ok: false, texto: 'Você não pode mandar mensagem para você mesmo.' };
+    if (!texto) return { ok: false, texto: 'A mensagem está vazia.' };
+    const corpo = texto.slice(0, 20_000) + nota;
     // revisão no caminho: tudo o que um agente revisado manda vai para o revisor dele, com a tarefa junto
     const revisor = this.revisorAtivo(de);
     if (revisor) {
-      texto = String(texto || '').trim();
-      if (!texto) return 'A mensagem está vazia.';
-      if (this.cerebro.mensagensNoPar(de, revisor) >= this.cfg.max_mensagens_par_10min) return 'Limite de mensagens entre você e o seu revisor nos últimos 10 minutos. Pare e espere.';
+      if (this.cerebro.mensagensNoPar(de, revisor) >= this.cfg.max_mensagens_par_10min) return { ok: false, texto: 'Limite de mensagens entre você e o seu revisor nos últimos 10 minutos. Pare e espere.' };
+      let final;
+      try { final = corpo + this.anexar(de, revisor, anexos); } catch (e) { return { ok: false, texto: `Não mandei: não deu para copiar os arquivos (${e.message}).` }; }
       const j = this.ativas.get(revisor);
-      const formatado = this.paraRevisao(de, revisor, texto.slice(0, 20_000), alvo === revisor ? null : alvo);
-      const posicao = this.enfileirar(j, de, texto.slice(0, 20_000), formatado);
+      const formatado = this.paraRevisao(de, revisor, final, alvo === revisor ? null : alvo);
+      const posicao = this.enfileirar(j, de, final, formatado);
       const nomeR = this.cerebro.sessao(revisor).nome;
       const desvio = alvo === revisor ? '' : ` Suas entregas passam por ${nomeR}: ele revisa antes de chegar a ${this.cerebro.sessao(alvo).nome}.`;
-      return `Mensagem entregue a ${nomeR}${posicao ? ` (entra quando ele terminar o turno, ${posicao} na frente)` : ''}.${desvio}`;
+      return { ok: true, texto: `Mensagem entregue a ${nomeR}${posicao ? ` (entra quando ele terminar o turno, ${posicao} na frente)` : ''}.${desvio}`, nome: nomeR, posicao };
     }
-    if (!this.cerebro.conectados(de).has(alvo)) return `Você não está ligado a "${para}" no palco. Só dá para falar com quem está ligado a você (a pessoa liga arrastando uma linha entre os cartões).`;
-    if (this.cerebro.mensagensNoPar(de, alvo) >= this.cfg.max_mensagens_par_10min) return 'Limite de mensagens entre vocês dois nos últimos 10 minutos. Pare e espere: isso costuma ser dois agentes respondendo um ao outro em loop.';
-    texto = String(texto || '').trim();
-    if (!texto) return 'A mensagem está vazia.';
-    const j = this.ativas.get(alvo);
-    const posicao = this.enfileirar(j, de, texto.slice(0, 20_000));
     const nome = this.cerebro.sessao(alvo).nome;
-    if (posicao === 0) return `Mensagem entregue a ${nome}. A resposta chega aqui como uma mensagem do Engram.`;
-    return `${nome} está ${j.estado}. A mensagem entra quando ele terminar o turno (${posicao} na frente dela). A resposta chega aqui como uma mensagem do Engram.`;
+    if (!this.cerebro.conectados(de).has(alvo)) return { ok: false, texto: `Você não está ligado a "${nome}" no palco. Só dá para falar com quem está ligado a você (a pessoa liga arrastando uma linha entre os cartões).` };
+    if (this.cerebro.mensagensNoPar(de, alvo) >= this.cfg.max_mensagens_par_10min) return { ok: false, texto: 'Limite de mensagens entre vocês dois nos últimos 10 minutos. Pare e espere: isso costuma ser dois agentes respondendo um ao outro em loop.' };
+    let final;
+    try { final = corpo + this.anexar(de, alvo, anexos); } catch (e) { return { ok: false, texto: `Não mandei: não deu para copiar os arquivos (${e.message}).` }; }
+    const j = this.ativas.get(alvo);
+    const info = {};
+    const posicao = this.enfileirar(j, de, final, null, info);
+    // quadro de tarefas e diário: o maestro delegou, ou um colega devolveu ao maestro (o revisor também devolve)
+    try {
+      if (this.ehMaestro(de)) {
+        const tn = this.tarefas?.delegou(de, alvo, final, info.n, setor);
+        // o número da tarefa vai junto: quem devolve cita, e o quadro fecha a tarefa certa
+        const item = tn ? j.caixa.find(([n]) => n === info.n) : null;
+        if (item) item[2] += `\n\n(No quadro do maestro esta é a tarefa ${tn}. Ao devolver o resultado, comece com "Tarefa ${tn}:".)`;
+      } else if (this.ehMaestro(alvo)) this.tarefas?.respondeu(de, alvo, final, info.n);
+    } catch { /* o quadro nunca atrapalha a entrega */ }
+    const copiados = anexos.length ? ` ${anexos.length === 1 ? 'O arquivo foi copiado' : `Os ${anexos.length} arquivos foram copiados`} para a pasta recebidos/ dele.` : '';
+    if (posicao === 0) return { ok: true, texto: `Mensagem entregue a ${nome}.${copiados} A resposta chega aqui como uma mensagem do Engram.`, nome, posicao };
+    return { ok: true, texto: `${nome} está ${j.estado}. A mensagem entra quando ele terminar o turno (${posicao} na frente dela).${copiados} A resposta chega aqui como uma mensagem do Engram.`, nome, posicao };
+  }
+
+  /** Para o setor inteiro: cada membro aberto e ligado a quem envia recebe a sua cópia (e os anexos na pasta dele). */
+  enviarAoSetor(de, setor, texto, anexos) {
+    const setores = this.cerebro.setores(setor.palco || 1);
+    const membros = [...this.ativas.keys()].filter(id => id !== de && this.cerebro.setorDe(id, setores)?.id === setor.id)
+      .sort((a, b) => this.nomeDe(a).localeCompare(this.nomeDe(b)));
+    if (!membros.length) return `O setor ${setor.nome} não tem nenhum agente aberto${this.cerebro.setorDe(de, setores)?.id === setor.id ? ' além de você' : ''}. Não mandei nada.`;
+    const conectados = this.cerebro.conectados(de);
+    const ligados = membros.filter(id => conectados.has(id));
+    const fora = membros.filter(id => !conectados.has(id)).map(id => this.nomeDe(id));
+    const nomesFora = fora.length ? ` Ficaram de fora (sem ligação com você): ${fora.join(', ')}.` : '';
+    if (!ligados.length) return `Não mandei nada: ninguém do setor ${setor.nome} está ligado a você.${nomesFora}`;
+    const nomes = ligados.map(id => this.nomeDe(id));
+    // quem tem revisor manda uma vez só, para ele, que revisa antes de repassar ao setor
+    const revisor = this.revisorAtivo(de);
+    if (revisor) {
+      const notaRevisor = `\n\n(${this.nomeDe(de)} quis mandar isto ao setor ${setor.nome} inteiro: ${nomes.join(', ')}. Só você recebeu: as entregas dele passam por você. Revise antes de repassar a cada um.)`;
+      return this.entregarA(de, revisor, texto, anexos, notaRevisor).texto + nomesFora;
+    }
+    const nota = `\n\n(Mensagem para o setor ${setor.nome} inteiro: ${nomes.join(', ')}. Cada um recebeu a sua cópia.)`;
+    const foram = [], falhas = [];
+    for (const id of ligados) {
+      const r = this.entregarA(de, id, texto, anexos, nota, setor.nome);
+      if (r.ok) foram.push(r.posicao ? `${r.nome} (na fila, ${r.posicao} na frente)` : r.nome);
+      else falhas.push(`${this.nomeDe(id)} (${r.texto.replace(/\.$/, '')})`);
+    }
+    let r = foram.length ? `Mandei para ${foram.length === 1 ? '1 colega' : `${foram.length} colegas`} do setor ${setor.nome}: ${foram.join(', ')}.` : `Não mandei para ninguém do setor ${setor.nome}.`;
+    if (foram.length && anexos.length) r += ` ${anexos.length === 1 ? 'O arquivo foi copiado' : 'Os arquivos foram copiados'} para a pasta recebidos/ de cada um.`;
+    if (falhas.length) r += ` Não foi para: ${falhas.join('; ')}.`;
+    r += nomesFora;
+    if (foram.length) r += ' As respostas chegam aqui como mensagens do Engram.';
+    return r;
   }
 
   verTela(de, quem, linhas) {
@@ -803,8 +1151,10 @@ class Janelas {
     if (papel === 'maestro') return 'O time tem um maestro só.';
     let setor = null;
     if (nomeSetor) {
-      setor = this.cerebro.setores().find(x => x.nome.toLowerCase() === String(nomeSetor).trim().toLowerCase());
-      if (!setor) return `Não há setor chamado "${nomeSetor}" no palco. ${this.setoresDoPalco() ? `Setores: ${this.setoresDoPalco().map(x => x.nome).join(', ')}.` : 'A pessoa ainda não desenhou setores.'}`;
+      const palco = this.cerebro.palcoDe(de);
+      setor = this.cerebro.setores(palco).find(x => x.nome.toLowerCase() === String(nomeSetor).trim().toLowerCase());
+      const existentes = this.setoresDoPalco(palco);
+      if (!setor) return `Não há setor chamado "${nomeSetor}" no seu palco. ${existentes ? `Setores: ${existentes.map(x => x.nome).join(', ')}.` : 'A pessoa ainda não desenhou setores nele.'}`;
     }
     try {
       const info = await this.abrir({ nome, modelo, papel, provedor: provedor || s.provedor || 'claude', ligarA: de, posicao: setor ? this.lugarNoSetor(setor) : null, tarefa: tarefa && String(tarefa).trim() ? [de, String(tarefa).trim()] : null });
@@ -821,17 +1171,17 @@ class Janelas {
   nomeDe(id) { return this.cerebro.sessao(id)?.nome || id; }
 
   /** As duas pontas pelo nome (só janelas abertas), ou a mensagem de erro. */
-  pontas(qa, qb) {
-    const a = this.achar(qa), b = this.achar(qb);
-    if (!a) return { erro: `Não há janela aberta chamada "${qa}". Veja os nomes com equipe.` };
-    if (!b) return { erro: `Não há janela aberta chamada "${qb}". Veja os nomes com equipe.` };
+  pontas(qa, qb, palco) {
+    const a = this.acharNoPalco(qa, palco), b = this.acharNoPalco(qb, palco);
+    if (!a) return { erro: this.naoAchei(qa, palco) };
+    if (!b) return { erro: this.naoAchei(qb, palco) };
     if (a === b) return { erro: 'As duas pontas são a mesma janela.' };
     return { a, b };
   }
 
   ligarJanelas(de, qa, qb) {
     if (!this.ehMaestro(de)) return 'Só o maestro liga agentes. Peça à pessoa (ela liga arrastando uma linha entre os cartões).';
-    const p = this.pontas(qa, qb);
+    const p = this.pontas(qa, qb, this.cerebro.palcoDe(de));
     if (p.erro) return p.erro;
     const nomes = `${this.nomeDe(p.a)} e ${this.nomeDe(p.b)}`;
     if (!this.cerebro.conectar(p.a, p.b)) return `${nomes} já estavam ligados.`;
@@ -841,7 +1191,7 @@ class Janelas {
 
   desligarJanelas(de, qa, qb, confirmarRevisao = false) {
     if (!this.ehMaestro(de)) return 'Só o maestro desliga agentes. Peça à pessoa (ela clica na linha e escolhe remover).';
-    const p = this.pontas(qa, qb);
+    const p = this.pontas(qa, qb, this.cerebro.palcoDe(de));
     if (p.erro) return p.erro;
     const nomes = `${this.nomeDe(p.a)} e ${this.nomeDe(p.b)}`;
     const c = this.cerebro.conexoes().find(x => (x.a === p.a && x.b === p.b) || (x.a === p.b && x.b === p.a));
@@ -873,25 +1223,26 @@ class Janelas {
   /** Arruma os cartões: "time" (maestro no centro, colegas em volta por papel) ou "lista" (posições dadas). */
   organizarPalco(de, modo, posicoes) {
     if (!this.ehMaestro(de)) return 'Só o maestro organiza o palco.';
+    const palco = this.cerebro.palcoDe(de); // só o palco do maestro
     const tamanho = id => { const p = this.cerebro.posicao(id); return p ? [p.w, p.h] : TAMANHO_PADRAO; };
     const novas = [];
     if (modo === 'lista') {
       if (!Array.isArray(posicoes) || !posicoes.length) return 'No modo "lista", mande posicoes: [{ nome, x, y }].';
       const desconhecidos = [];
       for (const item of posicoes.slice(0, 40)) {
-        const id = this.achar(item?.nome);
+        const id = this.acharNoPalco(item?.nome, palco);
         if (!id) { desconhecidos.push(String(item?.nome ?? '')); continue; }
         const [w, h] = tamanho(id);
         const [x, y] = posicaoValida({ x: item.x, y: item.y, w, h });
         novas.push({ id, x, y, w, h });
       }
-      if (desconhecidos.length) return `Não mexi em nada: não há janela aberta chamada ${desconhecidos.map(n => `"${n}"`).join(', ')}. Veja os nomes com equipe.`;
+      if (desconhecidos.length) return `Não mexi em nada: não há janela aberta chamada ${desconhecidos.map(n => `"${n}"`).join(', ')} no seu palco. Veja os nomes com equipe.`;
     } else if (modo === 'time') {
       // quem está num setor fica onde está (o setor é a arrumação da pessoa); os setores viram obstáculos
-      const setores = this.cerebro.setores();
+      const setores = this.cerebro.setores(palco);
       const noSetor = id => !!this.cerebro.setorDe(id, setores);
       const papelDe = id => this.cerebro.sessao(id)?.papel || 'livre';
-      const colegas = [...this.ativas.keys()].filter(id => id !== de && !noSetor(id))
+      const colegas = this.abertasNoPalco(palco).filter(id => id !== de && !noSetor(id))
         .sort((x, y) => papelDe(x).localeCompare(papelDe(y)) || this.nomeDe(x).localeCompare(this.nomeDe(y)));
       if (!colegas.length) return 'Nada para arrumar: todos os colegas estão dentro de setores, e eles ficam onde a pessoa deixou.';
       // o maestro fica onde está e vira o centro (assim ele não cai em cima de um setor)
@@ -900,7 +1251,8 @@ class Janelas {
       const centro = pm ? { x: pm.x + pm.w / 2, y: pm.y + pm.h / 2 } : { x: 0, y: 0 };
       const maestro = { id: de, x: Math.round(centro.x - mw / 2), y: Math.round(centro.y - mh / 2), w: mw, h: mh };
       if (!pm) novas.push(maestro);
-      const obstaculos = [maestro, ...setores.map(s => ({ x: s.x, y: s.y - 60, w: s.w, h: s.h + 60 }))]; // 60: a etiqueta em cima
+      // os setores (com a etiqueta em cima), as automações e os post-its; os cartões dos colegas é que vão mudar
+      const obstaculos = [maestro, ...this.ocupados({ ignorar: [...this.ativas.keys()], palco })];
       if (colegas.length) {
         // colegas numa elipse em volta do maestro, os do mesmo papel lado a lado; abre a elipse até ninguém encostar
         const tams = colegas.map(tamanho);
@@ -925,10 +1277,10 @@ class Janelas {
       }
     } else return 'Modo desconhecido: use "time" ou "lista".';
     for (const n of novas) this.cerebro.posicaoSalvar(n.id, n.x, n.y, n.w, n.h);
-    this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: novas });
+    this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: novas, palco });
     if (modo === 'lista') return `Movi ${novas.length === 1 ? '1 cartão' : `${novas.length} cartões`} no palco.`;
     const movidos = novas.filter(n => n.id !== de).length;
-    const emSetor = [...this.ativas.keys()].filter(id => id !== de && this.cerebro.setorDe(id)).length;
+    const emSetor = this.abertasNoPalco(palco).filter(id => id !== de && this.cerebro.setorDe(id)).length;
     return `Organizei o palco: ${movidos === 1 ? '1 colega' : `${movidos} colegas`} em volta de você, agrupados por papel.${emSetor ? ` ${emSetor === 1 ? 'O colega que está num setor ficou' : `Os ${emSetor} que estão em setores ficaram`} onde a pessoa deixou.` : ''}`;
   }
 
@@ -960,8 +1312,9 @@ class Janelas {
 
   renomearPeloMaestro(de, quem, nome) {
     if (!this.ehMaestro(de)) return 'Só o maestro renomeia janelas. Peça à pessoa (duplo clique no nome do cartão).';
-    const id = this.achar(quem);
-    if (!id) return `Não há janela aberta chamada "${quem}". Veja os nomes com equipe.`;
+    const palco = this.cerebro.palcoDe(de);
+    const id = this.acharNoPalco(quem, palco);
+    if (!id) return this.naoAchei(quem, palco);
     try {
       const r = this.renomear(id, nome);
       if (r.antes === r.nome) return `${r.nome} já tem esse nome.`;
@@ -974,12 +1327,12 @@ class Janelas {
   // ---------------------------------------------------------------- setores pelo maestro
 
   /** Os nomes viram ids de janelas abertas; devolve { ids } ou { erro }. */
-  agentesPorNome(nomes) {
+  agentesPorNome(nomes, palco) {
     const lista = (Array.isArray(nomes) ? nomes : []).map(n => String(n ?? '').trim()).filter(Boolean);
     if (!lista.length) return { erro: 'Diga quais agentes ficam no setor, em agentes: ["nome", ...] (os nomes como aparecem em equipe).' };
     const ids = [], faltam = [];
-    for (const n of lista) { const id = this.achar(n); if (id) { if (!ids.includes(id)) ids.push(id); } else faltam.push(`"${n}"`); }
-    if (faltam.length) return { erro: `Não há janela aberta chamada ${faltam.join(', ')}. Veja os nomes com equipe.` };
+    for (const n of lista) { const id = this.acharNoPalco(n, palco); if (id) { if (!ids.includes(id)) ids.push(id); } else faltam.push(`"${n}"`); }
+    if (faltam.length) return { erro: `Não há janela aberta chamada ${faltam.join(', ')} no seu palco (${this.cerebro.palcoNome(palco)}). Veja os nomes com equipe.` };
     return { ids };
   }
 
@@ -987,31 +1340,30 @@ class Janelas {
    * A área de um setor em volta destes agentes. Se o retângulo pegaria alguém de fora ou encostaria
    * noutro setor, junta os cartões numa grade num lugar livre e envolve a grade.
    */
-  areaEmVolta(ids, ignorar = null) {
-    const FOLGA = 60, VAO = 60, ETIQUETA = 70;
+  areaEmVolta(ids, ignorar = null, palco = this.cerebro.palcoDe(ids[0])) {
+    const FOLGA = 60, VAO = 60;
     const [pw, ph] = TAMANHO_PADRAO;
     const pos = id => this.cerebro.posicao(id) || { x: 0, y: 0, w: pw, h: ph };
-    const caixa = ps => {
-      const x = Math.min(...ps.map(p => p.x)) - FOLGA, y = Math.min(...ps.map(p => p.y)) - FOLGA;
-      return { x, y, w: Math.max(...ps.map(p => p.x + p.w)) + FOLGA - x, h: Math.max(...ps.map(p => p.y + p.h)) + FOLGA - y };
-    };
-    const encosta = (a, b, m = 0) => a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m;
-    const setores = this.cerebro.setores().filter(s => s.id !== ignorar).map(s => ({ x: s.x, y: s.y - ETIQUETA, w: s.w, h: s.h + ETIQUETA }));
-    const outros = [...this.ativas.keys()].filter(id => !ids.includes(id)).map(pos);
-    const centroDentro = (p, r) => p.x + p.w / 2 > r.x && p.x + p.w / 2 < r.x + r.w && p.y + p.h / 2 > r.y && p.y + p.h / 2 < r.y + r.h;
-    const r = caixa(ids.map(pos));
-    const comEtiqueta = { x: r.x, y: r.y - ETIQUETA, w: r.w, h: r.h + ETIQUETA };
-    if (!outros.some(p => centroDentro(p, r)) && !setores.some(s => encosta(comEtiqueta, s))) return { area: r, movidos: [] };
-    // junta numa grade: primeiro onde o grupo já está, senão à direita ou embaixo de tudo
-    const tams = ids.map(pos), w = Math.max(...tams.map(t => t.w)), h = Math.max(...tams.map(t => t.h));
+    const tams = ids.map(pos);
+    const caixa = caixaDe(tams);
+    const r = { x: caixa.x - FOLGA, y: caixa.y - FOLGA, w: caixa.w + 2 * FOLGA, h: caixa.h + 2 * FOLGA };
+    // o que não pode ficar dentro nem embaixo da área: os outros cartões abertos (encerrado não conta), os outros
+    // setores com a etiqueta deles, as automações e os post-its
+    const ocupados = this.ocupados({ ignorar: [...ids, ignorar].filter(Boolean), palco });
+    const comEtiqueta = { x: r.x, y: r.y - ETIQUETA_SETOR, w: r.w, h: r.h + ETIQUETA_SETOR };
+    // um post-it ou uma automação dentro da área não atrapalha (não entram no setor). Cartão de fora só atrapalha
+    // se o centro dele cair na área ou se ele encostar nos próprios cartões do grupo: um vizinho a poucos px da
+    // borda não faz o Engram mudar de lugar o que a pessoa arrumou.
+    const centroDentro = o => { const c = centro(o); return c.x > r.x && c.x < r.x + r.w && c.y > r.y && c.y < r.y + r.h; };
+    const atrapalha = o => (o.tipo === 'setor' ? toca(comEtiqueta, o) : o.tipo === 'cartao' && (centroDentro(o) || toca(caixa, o)));
+    if (!ocupados.some(atrapalha)) return { area: r, movidos: [] };
+    // junta numa grade, no lugar livre mais perto de onde o grupo está (antes ia para a direita de tudo)
+    const w = Math.max(...tams.map(t => t.w)), h = Math.max(...tams.map(t => t.h));
     const cols = Math.ceil(Math.sqrt(ids.length)), linhas = Math.ceil(ids.length / cols);
     const larg = cols * w + (cols - 1) * VAO + 2 * FOLGA, alt = linhas * h + (linhas - 1) * VAO + 2 * FOLGA;
-    const ocupados = [...outros, ...setores];
-    const livre = (x, y) => !ocupados.some(o => encosta({ x, y: y - ETIQUETA, w: larg, h: alt + ETIQUETA }, o, 80));
-    const tudo = ocupados.length ? caixa([...ocupados, ...tams]) : r;
-    const candidatos = [[r.x, r.y], [tudo.x + tudo.w + 200, r.y], [r.x, tudo.y + tudo.h + 200 + ETIQUETA]];
-    let [ox, oy] = candidatos.find(([x, y]) => livre(x, y)) || [tudo.x + tudo.w + 200, tudo.y];
-    ox = Math.round(ox); oy = Math.round(oy);
+    // procura a área já com a etiqueta em cima
+    const [ox, oyEtiqueta] = acharLugar(larg, alt + ETIQUETA_SETOR, centro(r), ocupados, { folga: 80, preferidos: [[r.x, r.y - ETIQUETA_SETOR]] });
+    const oy = oyEtiqueta + ETIQUETA_SETOR;
     const movidos = ids.map((id, i) => ({ id, x: ox + FOLGA + (i % cols) * (w + VAO), y: oy + FOLGA + Math.floor(i / cols) * (h + VAO), w: tams[i].w, h: tams[i].h }));
     return { area: { x: ox, y: oy, w: larg, h: alt }, movidos };
   }
@@ -1020,18 +1372,19 @@ class Janelas {
     if (!this.ehMaestro(de)) return 'Só o maestro cria setores. Peça à pessoa (ela desenha com o botão Setor no palco).';
     nome = String(nome ?? '').trim().slice(0, 24);
     if (!nome) return 'Dê um nome ao setor.';
-    const setores = this.cerebro.setores();
+    const palco = this.cerebro.palcoDe(de);
+    const setores = this.cerebro.setores(palco);
     const igual = setores.find(s => s.nome.toLowerCase() === nome.toLowerCase());
     if (igual) return `Já existe o setor ${igual.nome}. Para mudar, use editar_setor.`;
-    const a = this.agentesPorNome(agentes);
+    const a = this.agentesPorNome(agentes, palco);
     if (a.erro) return a.erro;
     const usadas = new Set(setores.map(s => s.cor));
     const hex = CORES_SETOR[cor] || Object.values(CORES_SETOR).find(c => !usadas.has(c)) || Object.values(CORES_SETOR)[setores.length % 6];
-    const { area, movidos } = this.areaEmVolta(a.ids);
+    const { area, movidos } = this.areaEmVolta(a.ids, null, palco);
     for (const m of movidos) this.cerebro.posicaoSalvar(m.id, m.x, m.y, m.w, m.h);
-    const s = { id: `setor-${crypto.randomUUID().slice(0, 8)}`, nome, cor: hex, instrucao: String(instrucao ?? '').trim().slice(0, 2000), ...area };
+    const s = { id: `setor-${crypto.randomUUID().slice(0, 8)}`, nome, cor: hex, instrucao: String(instrucao ?? '').trim().slice(0, 2000), ...area, palco };
     this.cerebro.setorSalvar(s);
-    if (movidos.length) this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: movidos });
+    if (movidos.length) this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: movidos, palco });
     this.avisar({ tipo: 'setor', acao: 'salvo', setor: s });
     const nomes = a.ids.map(id => this.nomeDe(id)).join(', ');
     return `Criei o setor ${nome} com ${nomes}.${movidos.length ? ' Juntei os cartões deles num lugar livre, porque em volta de onde estavam o setor pegaria outros agentes ou encostaria noutro setor.' : ''}${s.instrucao ? ' A instrução do setor vai junto em cada tarefa que eles receberem.' : ''}`;
@@ -1039,7 +1392,8 @@ class Janelas {
 
   editarSetor(de, { setor, nome, cor, instrucao, agentes } = {}) {
     if (!this.ehMaestro(de)) return 'Só o maestro muda setores.';
-    const setores = this.cerebro.setores();
+    const palco = this.cerebro.palcoDe(de);
+    const setores = this.cerebro.setores(palco);
     const s = setores.find(x => x.nome.toLowerCase() === String(setor ?? '').trim().toLowerCase());
     if (!s) return `Não há setor chamado "${setor}". ${setores.length ? `Setores: ${setores.map(x => x.nome).join(', ')}.` : 'O palco ainda não tem setores.'}`;
     const novo = { ...s };
@@ -1051,23 +1405,23 @@ class Janelas {
     if (instrucao !== undefined) novo.instrucao = String(instrucao ?? '').trim().slice(0, 2000);
     let movidos = [];
     if (agentes !== undefined) {
-      const a = this.agentesPorNome(agentes);
+      const a = this.agentesPorNome(agentes, palco);
       if (a.erro) return a.erro;
-      const r = this.areaEmVolta(a.ids, s.id);
+      const r = this.areaEmVolta(a.ids, s.id, palco);
       Object.assign(novo, r.area);
       movidos = r.movidos;
       for (const m of movidos) this.cerebro.posicaoSalvar(m.id, m.x, m.y, m.w, m.h);
     }
     this.cerebro.setorSalvar(novo);
-    if (movidos.length) this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: movidos });
+    if (movidos.length) this.avisar({ tipo: 'palco', acao: 'organizado', posicoes: movidos, palco });
     this.avisar({ tipo: 'setor', acao: 'salvo', setor: novo });
-    const membros = [...this.ativas.keys()].filter(id => this.cerebro.setorDe(id)?.id === s.id).map(id => this.nomeDe(id));
+    const membros = this.abertasNoPalco(palco).filter(id => this.cerebro.setorDe(id)?.id === s.id).map(id => this.nomeDe(id));
     return `Setor ${novo.nome} atualizado. Dentro dele: ${membros.length ? membros.join(', ') : 'ninguém'}.${movidos.length ? ' Juntei os cartões num lugar livre.' : ''}`;
   }
 
   removerSetor(de, { setor } = {}) {
     if (!this.ehMaestro(de)) return 'Só o maestro remove setores.';
-    const s = this.cerebro.setores().find(x => x.nome.toLowerCase() === String(setor ?? '').trim().toLowerCase());
+    const s = this.cerebro.setores(this.cerebro.palcoDe(de)).find(x => x.nome.toLowerCase() === String(setor ?? '').trim().toLowerCase());
     if (!s) return `Não há setor chamado "${setor}".`;
     this.cerebro.setorApagar(s.id);
     this.avisar({ tipo: 'setor', acao: 'removido', id: s.id });
@@ -1100,8 +1454,10 @@ class Janelas {
     return `[Engram · mensagem de ${r.nome} (${r.papel}, ${r.modelo})]\n${texto}${doSetor}\n\n(${dica})`;
   }
 
-  enfileirar(j, de, texto, formatado = null) {
+  /** Põe a mensagem na caixa do agente. `info` (opcional) recebe o número dela (info.n), para o quadro de tarefas. */
+  enfileirar(j, de, texto, formatado = null, info = null) {
     const n = this.cerebro.mensagemRegistrar(de, j.id, texto);
+    if (info) info.n = n;
     const naFrente = j.caixa.length + (j.entregando || !LIVRE.has(j.estado) ? 1 : 0);
     j.caixa.push([n, de, (formatado || this.formatar(de, texto, j.id)) + this.avisoDeNome(j.id)]);
     this.avisar({ tipo: 'mensagem', fase: 'enviada', de, para: j.id, texto: texto.slice(0, 240), n });
@@ -1112,12 +1468,45 @@ class Janelas {
   tentarEntregar(j, espera = 0) {
     if (!j.viva || j.entregando || !j.caixa.length || !LIVRE.has(j.estado)) return;
     j.entregando = true;
-    setTimeout(() => this.colar(j), espera);
+    // a tela do CLI ainda está montando logo depois de abrir (ou de confiar na pasta): colar antes disso perde a mensagem
+    const montando = Math.max(0, (j.prontaEm || 0) + MONTAR_TELA - Date.now());
+    setTimeout(() => this.colar(j), Math.max(espera, montando));
+  }
+
+  /**
+   * Agente com ganchos (Claude): o UserPromptSubmit confirma que a mensagem entrou. Sem ele em CONFIRMAR ms, olha a
+   * tela: trabalhando = entrou (o gancho é que não veio); texto parado na caixa = o Enter não pegou, manda de novo;
+   * caixa vazia = a colagem se perdeu, volta para a frente da fila (até 2 vezes; depois avisa a pessoa).
+   */
+  conferirEntrega(id, j) {
+    const g = j.aguardando;
+    if (!g || !j.viva || Date.now() - g.em < CONFIRMAR) return;
+    const tela = j.tela.texto(16);
+    if (TRABALHANDO.test(tela.split('\n').slice(-8).join('\n'))) { j.aguardando = null; return; }
+    // só a caixa de entrada (as últimas linhas): o histórico acima repete o que já foi enviado
+    const caixa = tela.split('\n').slice(-6).join(' ').replace(/\s+/g, ' ');
+    const inicio = g.texto.replace(/\s+/g, ' ').trim().slice(0, 28);
+    const naCaixa = /\[Pasted text/i.test(caixa) || (inicio && caixa.includes(inicio));
+    if (naCaixa && !g.enterDeNovo) { j.escrever('\r'); g.enterDeNovo = true; g.em = Date.now(); return; }
+    j.aguardando = null;
+    // depois do Enter de novo, caixa vazia = entrou (os ganchos é que não vieram): nunca cola outra vez, para não duplicar
+    if (g.enterDeNovo && !naCaixa) { this.mudarEstado(id, j, 'esperando você', 'entrega'); return; } // não trava a caixa em "pensando"
+    const nome = this.cerebro.sessao(id)?.nome || 'o agente';
+    if (naCaixa || g.tentativas >= 2) {
+      this.mudarEstado(id, j, 'esperando você', 'entrega');
+      this.avisar({ tipo: 'aviso', texto: `A mensagem para ${nome} não entrou no terminal dele. Confira a janela e mande de novo, se precisar.` });
+      return;
+    }
+    require('./config').registrar(`${nome}: a colagem não entrou (sem UserPromptSubmit e caixa vazia); entrego de novo (tentativa ${g.tentativas + 2})`);
+    j.caixa.unshift([g.n, g.de, g.texto, g.tentativas + 1]);
+    this.mudarEstado(id, j, 'esperando você', 'entrega');
+    this.tentarEntregar(j, 1500);
   }
 
   colar(j) {
     if (!j.viva || !j.caixa.length || !LIVRE.has(j.estado)) { j.entregando = false; return; }
-    const [n, de, texto] = j.caixa.shift();
+    const [n, de, naFila, tentativas = 0] = j.caixa.shift();
+    const texto = tentativas ? naFila : naFila + this.avisoDeCerebro(j.id); // na recolocação o aviso já está no texto
     j.escrever(COLAR_INICIO + texto.replace(/\r\n/g, '\n') + COLAR_FIM);
     j.estado = 'pensando'; // até o gancho confirmar, ninguém mais cola por cima
     j.teveTurno = true;
@@ -1129,8 +1518,10 @@ class Janelas {
       j.escrever('\r');
       j.entregando = false;
       this.cerebro.mensagemEntregue(n);
+      try { this.tarefas?.chegou(n); } catch { /* o quadro nunca atrapalha a entrega */ }
       this.cerebro.sessaoEstado(j.id, 'pensando');
       this.avisar({ tipo: 'mensagem', fase: 'entregue', de, para: j.id, n });
+      if (a.ganchos) j.aguardando = { n, de, texto, em: Date.now(), tentativas };
       if (a.ocupado && !a.ganchos) {
         // se não começou a trabalhar, o Enter não pegou: manda de novo (numa caixa vazia, Enter não faz nada)
         setTimeout(() => {
@@ -1158,6 +1549,8 @@ class Janelas {
     }
     if (estado) { j.estado = estado; this.cerebro.sessaoEstado(id, estado); }
     if (evento === 'SessionStart' || evento === 'UserPromptSubmit') j.pergunta = null;
+    if (evento === 'UserPromptSubmit' || evento === 'Stop') j.aguardando = null; // a mensagem entrou
+    if (evento === 'SessionStart') j.prontaEm = Date.now();
     j.aposResposta = 0; // chegou um gancho: o estado volta a vir deles
     let semPergunta; // undefined = a tela não mexe na pergunta que está mostrando
     if (estado === 'precisa de você') {
@@ -1253,6 +1646,7 @@ class Janelas {
     const toques = [];
     for (const it of itens) {
       if (it.tipo === 'chamada') {
+        j.ultimaAcao = { o_que: resumoCodex(it), quando: Date.now() }; // para o equipe ("última ação")
         try { this.pensamentoCodex(id, j, it); } catch { /* patch estranho: sem bolha */ }
         if (it.id) j.chamadasAbertas.set(it.id, it);
         else toques.push(...this.toquesCodex(it, j));
@@ -1310,9 +1704,104 @@ function pedePermissao(d) {
   return t.includes('permission') || t.includes('permissão') || t.includes('approve');
 }
 
+// ---------------------------------------------------------------- geometria do palco (x, y = canto de cima à esquerda)
+
+/** Os dois retângulos se encostam (com `folga` de distância mínima)? */
+function toca(a, b, folga = 0) {
+  return a.x < b.x + b.w + folga && b.x < a.x + a.w + folga && a.y < b.y + b.h + folga && b.y < a.y + a.h + folga;
+}
+function centro(r) { return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; }
+function caixaDe(rs) {
+  const x = Math.min(...rs.map(r => r.x)), y = Math.min(...rs.map(r => r.y));
+  return { x, y, w: Math.max(...rs.map(r => r.x + r.w)) - x, h: Math.max(...rs.map(r => r.y + r.h)) - y };
+}
+
+/**
+ * O lugar livre mais perto da âncora para um retângulo w × h: primeiro os `preferidos`, depois em anéis cada vez
+ * maiores em volta da âncora (o centro do retângulo procurado), sem encostar em nenhum ocupado. Devolve [x, y].
+ */
+function acharLugar(w, h, ancora, ocupados, { folga = 60, preferidos = [], passo = 40, aneis = 150 } = {}) {
+  const livre = (x, y) => !ocupados.some(o => toca({ x, y, w, h }, o, folga));
+  for (const [x, y] of preferidos) if (livre(x, y)) return [Math.round(x), Math.round(y)];
+  const x0 = ancora.x - w / 2, y0 = ancora.y - h / 2;
+  if (livre(x0, y0)) return [Math.round(x0), Math.round(y0)];
+  for (let anel = 1; anel <= aneis; anel++) {
+    const pontos = [];
+    for (let i = -anel; i <= anel; i++) {
+      pontos.push([i, -anel], [i, anel]);
+      if (Math.abs(i) < anel) pontos.push([-anel, i], [anel, i]);
+    }
+    // o palco é mais largo que alto: um passo para o lado custa menos que um para cima ou para baixo
+    pontos.sort((a, b) => Math.hypot(a[0], a[1] * 1.5) - Math.hypot(b[0], b[1] * 1.5));
+    for (const [i, k] of pontos) {
+      const x = x0 + i * passo, y = y0 + k * passo;
+      if (livre(x, y)) return [Math.round(x), Math.round(y)];
+    }
+  }
+  // nada livre num raio de 6000 px: embaixo de tudo
+  return [Math.round(x0), Math.round(Math.max(y0, ...ocupados.map(o => o.y + o.h)) + folga * 2)];
+}
+
+/** O caminho de verdade (segue atalhos e links, nome longo do Windows); sem acesso, o caminho resolvido. */
+function real(p) {
+  try { return fs.realpathSync.native(path.resolve(String(p))); } catch { return path.resolve(String(p)); }
+}
+
+// o que o Engram acrescenta no fim de uma mensagem (anexos, nota do setor): o "assunto" para antes disso
+const FIM_DO_ENGRAM = /\n\n\[Arquivos que |\n\n\((?:Mensagem para o setor |[^\n()]{1,60} quis mandar isto ao setor )/;
+
+/**
+ * Esconde o que parece segredo num comando antes de mostrar a outro agente (a última ação no equipe): valor
+ * depois de token=, senha=, Authorization:, Bearer, --password..., e sequências longas que parecem chave.
+ */
+function mascarar(texto) {
+  return String(texto || '')
+    // Authorization: Bearer xxx / Basic xxx (o esquema fica, o valor sai)
+    .replace(/((?:proxy-)?authorization["']?\s*[:=]\s*["']?(?:bearer|basic|token|digest)?\s*)[^\s"']+/gi, '$1•••')
+    .replace(/(\b(?:bearer|basic)\s+)(?!•)[^\s"']+/gi, '$1•••')
+    .replace(/((?:token|access[_-]?token|api[_-]?key|apikey|secret|senha|password|passwd|pwd|chave)["']?\s*(?:[:=]|\s)\s*["']?)[^\s"'&;,]+/gi, '$1•••')
+    .replace(/(--(?:password|senha|token|key|api-key)(?:=|\s+))[^\s"']+/gi, '$1•••')
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:)[^\s@/]+@/gi, '$1•••@') // https://usuario:senha@servidor
+    .replace(/((?:\s-u|--user)(?:=|\s+)["']?[^\s:"']+:)[^\s"']+/gi, '$1•••') // curl -u usuario:senha
+    .replace(/(\s-p)(?=[^\s-])\S+/g, '$1•••') // mysql -pSEGREDO (com espaço, como em mkdir -p, não é senha)
+    .replace(/[A-Za-z0-9_-]{32,}/g, '•••'); // sequência longa sem separador: chave, token (caminhos têm barras e ficam)
+}
+
+/** "40 s", "12 min", "2 h 5 min", "3 dias". */
+function haQuanto(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s} s`;
+  const min = Math.floor(s / 60);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return min % 60 ? `${h} h ${min % 60} min` : `${h} h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? '1 dia' : `${d} dias`;
+}
+
+/** O começo de uma mensagem, numa linha só (o "assunto" que o equipe mostra). */
+function assunto(texto, max = 160) {
+  const t = String(texto || '').replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+/** Número de palco válido (1 a PALCOS) ou null. */
+function palcoValido(n) {
+  const v = Number(n);
+  return n != null && n !== '' && Number.isInteger(v) && v >= 1 && v <= PALCOS ? v : null;
+}
+
 function posicaoValida(p) {
   const num = (v, padrao, a, b) => (Number.isFinite(Number(v)) ? Math.max(a, Math.min(Number(v), b)) : padrao);
   return [num(p.x, 0, -1e6, 1e6), num(p.y, 0, -1e6, 1e6), num(p.w, TAMANHO_PADRAO[0], 360, 2400), num(p.h, TAMANHO_PADRAO[1], 240, 1600)];
+}
+
+/** A ferramenta que o Codex chamou, numa linha: o arquivo do apply_patch ou o comando. */
+function resumoCodex(chamada) {
+  const texto = String(chamada.texto || '');
+  const patch = /\*\*\* (?:Add|Update|Delete) File: ([^\n\\]+)/.exec(texto);
+  if (patch) return `apply_patch ${patch[1].trim()}`;
+  return `${chamada.nome || 'ferramenta'} ${texto.replace(/\\n/g, ' ')}`.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
 function resumoEvento(evento, ferramenta, e, mensagem) {
@@ -1323,4 +1812,4 @@ function resumoEvento(evento, ferramenta, e, mensagem) {
   return `${nome} ${alvo}`.trim().slice(0, 200);
 }
 
-module.exports = { Janelas, posicaoValida, MotorErro, VARIAVEIS_FORA };
+module.exports = { Janelas, posicaoValida, palcoValido, acharLugar, caixaDe, mascarar, MotorErro, VARIAVEIS_FORA };

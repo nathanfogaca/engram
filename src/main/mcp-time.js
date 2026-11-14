@@ -1,4 +1,4 @@
-// As ferramentas do time (MCP): equipe, enviar, ver_tela, entregar_arquivo, as do maestro (criar_agente,
+// As ferramentas do time (MCP): equipe, enviar, ver_tela, entregar_arquivo, as do maestro (palco, criar_agente,
 // ligar, desligar, organizar_palco e os setores) e as dos fluxos.
 // Cada janela manda o próprio id no cabeçalho X-Engram-Sessao.
 
@@ -11,9 +11,15 @@ function ferramentas(janelas) {
   const opcoes = agentes.map(p => `${p.id} (${p.nome}): ${p.modelos.map(m => m.id).filter(Boolean).join(', ') || 'só o padrão'}`).join('; ');
   const objeto = (props, obrig = []) => ({ type: 'object', properties: props, required: obrig, additionalProperties: false });
   return [
-    { name: 'equipe', description: 'Mostra quem você é no Engram e os colegas ligados a você por uma linha no palco (nome, papel, modelo, estado). Só com esses colegas dá para falar.', inputSchema: objeto({}), annotations: { readOnlyHint: true } },
-    { name: 'enviar', description: 'Manda uma mensagem para um colega ligado a você. Ela entra na conversa dele como um pedido; se ele estiver ocupado, entra quando terminar o turno. Ele não vê a sua conversa: mande tudo o que ele precisa. A resposta chega na sua conversa marcada com [Engram · mensagem de ...]. Se as suas entregas passam por um revisor (veja em equipe), o Engram leva tudo o que você mandar a ele. Para devolver o resultado de uma automação do palco, use para = o nome da automação.',
-      inputSchema: objeto({ para: { type: 'string', description: 'nome do colega, como aparece em equipe' }, mensagem: { type: 'string', description: 'a tarefa ou o resultado, completo' } }, ['para', 'mensagem']) },
+    { name: 'equipe', description: 'Mostra quem você é no Engram e os colegas ligados a você por uma linha no palco: nome, papel, modelo, estado e o que cada um está fazendo (a tarefa atual ou a última e quem mandou, há quanto tempo e a última ação). Só com esses colegas dá para falar.', inputSchema: objeto({}), annotations: { readOnlyHint: true } },
+    { name: 'palco', description: 'Só para o maestro. O mapa do seu palco (a pessoa pode ter mais de um; você só vê e mexe no seu): x, y, largura e altura de cada cartão aberto (o seu também), de cada setor (com os agentes dentro), das automações e dos post-its, mais a área ocupada. Use para calcular onde pôr as coisas antes de organizar_palco ou criar_setor.', inputSchema: objeto({}), annotations: { readOnlyHint: true } },
+    { name: 'tarefas', description: 'Só para o maestro. O seu quadro de tarefas: cada mensagem que você manda pelo enviar vira uma tarefa (delegada → em andamento → devolvida → entregue), com o começo da devolutiva de quem respondeu. Use para não perder o fio do que já delegou e do que já voltou; marque como entregues (entregue: [n, ...]) as devolvidas que você já conferiu e passou adiante. A pessoa vê o mesmo quadro no palco.', inputSchema: objeto({ entregue: { type: 'array', items: { type: 'integer' }, maxItems: 50, description: 'números das tarefas que você já conferiu (opcional)' }, todas: { type: 'boolean', description: 'true = inclui as entregues dos últimos 30 dias' } }) },
+    { name: 'enviar', description: 'Manda uma mensagem para um colega ligado a você, ou para um setor inteiro (para = o nome do setor: cada membro ligado a você recebe a sua cópia, e a resposta diz quem recebeu). Ela entra na conversa dele como um pedido; se ele estiver ocupado, entra quando terminar o turno. Ele não vê a sua conversa: mande tudo o que ele precisa. Em arquivos, mande caminhos de arquivos para ir junto: o Engram copia cada um para a pasta recebidos/ de quem recebe e põe os caminhos no fim da mensagem (bom para um contexto longo: grave num arquivo e anexe). A soma dos arquivos respeita o limite de tamanho de Ajustes, e arquivos de segredo (chaves, .env) ou da pasta de dados do Engram não vão. Para uma automação, os arquivos só são citados pelo caminho, sem cópia. A resposta chega na sua conversa marcada com [Engram · mensagem de ...]. Se as suas entregas passam por um revisor (veja em equipe), o Engram leva tudo o que você mandar a ele. Para devolver o resultado de uma automação do palco, use para = o nome da automação.',
+      inputSchema: objeto({
+        para: { type: 'string', description: 'nome do colega ou do setor, como aparece em equipe' },
+        mensagem: { type: 'string', description: 'a tarefa ou o resultado, completo' },
+        arquivos: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'caminhos de arquivos para ir junto (opcional)' },
+      }, ['para', 'mensagem']) },
     { name: 'ver_tela', description: 'Mostra as últimas linhas do terminal de um colega ligado a você, para acompanhar sem interromper.',
       inputSchema: objeto({ quem: { type: 'string' }, linhas: { type: 'integer', minimum: 10, maximum: 200, default: 60 } }, ['quem']), annotations: { readOnlyHint: true } },
     { name: 'entregar_arquivo', description: 'Devolve um arquivo à pessoa: copia para a pasta entregues/ da sua janela, e ela vê na área de arquivos da sua conversa. Se você já gravou direto em entregues/, não precisa chamar.',
@@ -27,7 +33,7 @@ function ferramentas(janelas) {
       }, required: ['nome', 'blocos'] } }, ['fluxo']) },
     { name: 'fluxo_marcar', description: 'Marca na vista Fluxos do Engram o bloco em que você está mexendo (trabalhando), que terminou (feito) ou que deu problema (falhou): a pessoa vê o bloco acender com o seu nome. Mande também os arquivos que você criou ou mudou nele (caminhos relativos à pasta do projeto).',
       inputSchema: objeto({ fluxo: { type: 'string', description: 'id do fluxo (veja em fluxos)' }, bloco: { type: 'string', description: 'id do bloco' }, estado: { type: 'string', enum: ['trabalhando', 'feito', 'falhou'] }, arquivos: { type: 'array', items: { type: 'string' } } }, ['fluxo', 'bloco', 'estado']) },
-    { name: 'criar_agente', description: `Só para o maestro. Abre uma janela nova no palco, já ligada a você, e opcionalmente já manda a primeira tarefa. Modelo leve para tarefa simples, forte para análise difícil. Sem "agente", usa o mesmo agente (CLI) que você. Máximo de ${janelas.cfg.max_janelas} janelas abertas. Agentes e modelos disponíveis: ${opcoes}.`,
+    { name: 'criar_agente', description: `Só para o maestro. Abre uma janela nova no seu palco, já ligada a você, e opcionalmente já manda a primeira tarefa. Modelo leve para tarefa simples, forte para análise difícil. Sem "agente", usa o mesmo agente (CLI) que você. O número máximo de janelas abertas é o que a pessoa escolheu em Ajustes e soma todos os palcos (o equipe mostra quantas estão abertas e o limite). Agentes e modelos disponíveis: ${opcoes}.`,
       inputSchema: objeto({
         nome: { type: 'string' }, papel: { type: 'string', enum: papeis },
         agente: { type: 'string', enum: agentes.map(p => p.id), description: 'qual CLI de agente abrir' },
@@ -38,7 +44,7 @@ function ferramentas(janelas) {
       inputSchema: objeto({ a: { type: 'string', description: 'nome de uma ponta' }, b: { type: 'string', description: 'nome da outra ponta' } }, ['a', 'b']) },
     { name: 'desligar', description: 'Só para o maestro. Tira a linha entre duas janelas: elas deixam de conversar. Se a ligação tiver revisão, ela sai junto, então o Engram recusa até você confirmar com a pessoa (confirmar_revisao=true). A resposta avisa se algum colega ficou sem caminho até você.',
       inputSchema: objeto({ a: { type: 'string' }, b: { type: 'string' }, confirmar_revisao: { type: 'boolean', description: 'só depois de a pessoa concordar em apagar a revisão da ligação' } }, ['a', 'b']) },
-    { name: 'organizar_palco', description: 'Só para o maestro, e só quando a pessoa pedir para organizar ou arrumar o palco: nunca por conta própria, porque muda a posição que ela deixou nos cartões. Modo "time": você no centro e os colegas em volta, agrupados por papel; quem está dentro de um setor fica onde está. Modo "lista": posições dadas por você, em posicoes [{ nome, x, y }] (pixels do palco, o seu cartão em 0,0 fica no centro). Depois a tela enquadra o time.',
+    { name: 'organizar_palco', description: 'Só para o maestro, e só quando a pessoa pedir para organizar ou arrumar o palco: nunca por conta própria, porque muda a posição que ela deixou nos cartões. Modo "time": você no centro e os colegas em volta, agrupados por papel; quem está dentro de um setor fica onde está. Modo "lista": posições dadas por você, em posicoes [{ nome, x, y }] (pixels do palco; x, y é o canto de cima à esquerda do cartão, as mesmas coordenadas que a ferramenta palco mostra). Depois a tela enquadra o time.',
       inputSchema: objeto({
         modo: { type: 'string', enum: ['time', 'lista'] },
         posicoes: { type: 'array', items: { type: 'object', properties: { nome: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } }, required: ['nome', 'x', 'y'] }, description: 'só no modo lista' },
@@ -83,7 +89,9 @@ async function tratar(janelas, sessao, m) {
     try {
       switch (p.name) {
         case 'equipe': return ok(texto(JSON.stringify(janelas.equipe(sessao), null, 2)));
-        case 'enviar': return ok(texto(janelas.enviar(sessao, String(a.para || ''), String(a.mensagem || ''))));
+        case 'palco': return ok(texto(janelas.palco(sessao)));
+        case 'tarefas': return ok(texto(janelas.tarefas ? janelas.tarefas.paraMaestro(sessao, { entregue: a.entregue, todas: !!a.todas }) : 'O quadro de tarefas não está ligado nesta versão.'));
+        case 'enviar': return ok(texto(janelas.enviar(sessao, String(a.para || ''), String(a.mensagem || ''), a.arquivos)));
         case 'ver_tela': return ok(texto(janelas.verTela(sessao, String(a.quem || ''), a.linhas ?? 60)));
         case 'fluxos': return ok(texto(janelas.fluxos ? janelas.fluxos.paraAgente() : 'Os fluxos não estão disponíveis.'));
         case 'fluxo_desenhar': return ok(texto(janelas.fluxos.desenhar(sessao, a.fluxo)));

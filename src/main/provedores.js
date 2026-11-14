@@ -282,7 +282,7 @@ class Provedores {
   }
 
   ids() { return Object.keys(ADAPTADORES); }
-  adaptador(id) { return ADAPTADORES[id] || null; }
+  adaptador(id) { return Object.hasOwn(ADAPTADORES, String(id)) ? ADAPTADORES[id] : null; } // só os de verdade (nada de "constructor")
 
   /** Comando para abrir o CLI ([exe] ou [node, script]); null se não está instalado. */
   comando(id) {

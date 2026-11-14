@@ -129,6 +129,56 @@ export class Cerebro {
       this.ajustado = false;
       if (this.ativo) this.enquadrar();
     }
+    if (this.florescerAte && performance.now() < this.florescerAte) this.florescer();
+  }
+
+  // ---------------------------------------------------------------- troca da fonte (Local <-> Servidor)
+
+  /**
+   * A fonte do cérebro está trocando: as camadas recuam, esmaecem e desfocam ("trocando"); quando a troca termina
+   * ("trocado"), a próxima carga do grafo volta com brilho, uma onda de impulsos e o enquadramento novo.
+   */
+  trocouFonte(m) {
+    const acao = m?.acao;
+    if (acao === "trocando") { this.esmaecer(true); return; }
+    if (acao === "falhou") { this.florescerAte = 0; this.esmaecer(false); return; }
+    if (acao !== "trocado") return;
+    this.florescerAte = performance.now() + 5000;
+    clearTimeout(this.timerFlorescer);
+    // se o grafo não chegar logo, volta assim mesmo: o cérebro nunca fica apagado
+    this.timerFlorescer = setTimeout(() => { if (this.florescerAte) this.florescer(); }, 2500);
+  }
+
+  camadas() { return [this.tela, this.telaTras, this.gl?.tela].filter(Boolean); }
+
+  esmaecer(sim) {
+    const dur = movimentoReduzido ? 120 : sim ? 380 : 900;
+    for (const c of this.camadas()) {
+      c.style.transition = `opacity ${dur}ms ease, filter ${dur}ms ease, transform ${dur}ms cubic-bezier(.2,.8,.2,1)`;
+      c.style.transformOrigin = "50% 55%";
+      c.style.opacity = sim ? ".28" : "";
+      c.style.filter = sim ? "blur(5px) saturate(1.6) brightness(1.4)" : "";
+      c.style.transform = sim && !movimentoReduzido ? "scale(.94)" : "";
+    }
+  }
+
+  florescer() {
+    this.florescerAte = 0;
+    clearTimeout(this.timerFlorescer);
+    this.esmaecer(false);
+    if (movimentoReduzido) { if (this.ativo) this.enquadrar(false); return; }
+    // uma onda de impulsos e anéis atravessa o cérebro novo, do centro para fora
+    const notas = [...this.nos.values()].filter(n => n.tipo !== "agente" && !this.ocultos.has(n.tipo))
+      .sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y));
+    const passo = Math.max(1, Math.floor(notas.length / 14));
+    notas.filter((_, i) => i % passo === 0).slice(0, 14).forEach((n, i) => setTimeout(() => {
+      this.aneis.push({ n, cor: n.cor, t0: performance.now() });
+      n.refr = 0;
+      this.disparar(n, 1.1, null, 220);
+    }, 120 + i * 90));
+    for (const n of this.nos.values()) { n.vx += (Math.random() - 0.5) * 14; n.vy += (Math.random() - 0.5) * 14; }
+    this.calor = Math.max(this.calor, 0.6);
+    if (this.ativo) setTimeout(() => this.enquadrar(), 250);
   }
 
   posicaoInicial(n) {

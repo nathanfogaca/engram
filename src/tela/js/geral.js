@@ -96,40 +96,62 @@ export class PainelGeral {
     const campo = (rotulo, entrada, dica) => el("label", { class: "aj-campo" }, el("span", { text: rotulo }), entrada, dica ? el("small", { class: "aj-dica", text: dica }) : null);
     const pasta = el("input", { value: c.pasta_trabalho || "", spellcheck: "false" });
     const escolher = (alvo, titulo) => el("button", { type: "button", class: "btn pequeno", onclick: async () => { const r = await api("/api/escolher-pasta", { json: { titulo } }); if (r.caminho) alvo.value = r.caminho; } }, "Escolher…");
-    let fonte = c.cerebro.fonte === "remoto" ? "remoto" : "pasta";
+    const ativa = c.cerebro_fonte_ativa === "remoto" ? "remoto" : "pasta";
+    const servidor = c.cerebro_servidor || {};
     const cerPasta = el("input", { value: c.cerebro.pasta || "", spellcheck: "false" });
     const cerUrl = el("input", { value: c.cerebro.url || "", placeholder: "https://servidor:8765/mcp", spellcheck: "false" });
     const cerToken = el("input", { value: c.cerebro.token_env || "", placeholder: "ex.: CEREBRO_TOKEN", spellcheck: "false" });
     const cerCa = el("input", { value: c.cerebro.ca || "", placeholder: "caminho do certificado (opcional)", spellcheck: "false" });
     const cerRemota = el("input", { value: c.cerebro.pasta_remota || "cerebro", spellcheck: "false" });
     const cerServidor = el("input", { value: c.cerebro.servidor || "", placeholder: "o nome dele em MCPs (ex.: cerebro)", spellcheck: "false" });
+    // as duas fontes ficam guardadas e sempre à mostra; "Em uso agora" troca na hora (o mesmo seletor do topo)
+    const titulo = texto => el("small", { class: "aj-dica aj-subtitulo", text: texto, style: { display: "block", margin: "12px 0 6px", fontWeight: "600", color: "var(--texto-forte)" } });
     const blocoPasta = el("div", { class: "aj-campos" }, el("div", { class: "aj-campo largo" }, el("span", { text: "Pasta das notas" }), el("div", { class: "linha" }, cerPasta, escolher(cerPasta, "Pasta do cérebro"))));
     const blocoRemoto = el("div", { class: "aj-campos" },
       campo("Endereço do MCP", cerUrl), campo("Variável com o token", cerToken, "O token fica na variável de ambiente, não no Engram."),
       campo("Certificado (CA)", cerCa), campo("Pasta no servidor", cerRemota),
       campo("Nome do MCP nos agentes", cerServidor, "Cadastre o mesmo servidor em MCPs para os agentes lerem e gravarem as notas. Com ele cadastrado, o Engram usa o nome de lá sozinho."));
     const seg = el("div", { class: "aj-seg" });
-    const desenharFonte = () => {
-      seg.replaceChildren(...[["pasta", "Pasta neste computador"], ["remoto", "Servidor remoto (avançado)"]].map(([f, r]) =>
-        el("button", { type: "button", class: fonte === f ? "ativo" : "", onclick: () => { fonte = f; desenharFonte(); } }, r)));
-      blocoPasta.hidden = fonte !== "pasta";
-      blocoRemoto.hidden = fonte !== "remoto";
+    const desenharFonte = (trocandoPara = null) => {
+      seg.replaceChildren(...[["pasta", "Local: pasta neste computador"], ["remoto", servidor.configurado ? `Servidor: ${servidor.nome || "remoto"}` : "Servidor (não configurado)"]].map(([f, r]) =>
+        el("button", {
+          type: "button", class: `${ativa === f ? "ativo" : ""}${trocandoPara === f ? " trocando" : ""}`,
+          disabled: !!trocandoPara || (f === "remoto" && !servidor.configurado),
+          title: f === "remoto" && !servidor.configurado ? "Preencha o endereço do servidor abaixo e salve" : ativa === f ? "Em uso agora" : "Trocar agora (sem reiniciar)",
+          onclick: async () => {
+            if (f === ativa) return;
+            desenharFonte(f);
+            try {
+              await api("/api/cerebro/fonte", { json: { fonte: f } });
+              avisar({ texto: f === "remoto" ? "Cérebro no servidor" : "Cérebro na pasta deste computador", cor: "#4ade9f" });
+            } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d", tempo: 9000 }); }
+            await this.carregar();
+          },
+        }, trocandoPara === f ? "Trocando…" : r)));
     };
     desenharFonte();
     const num = (v, a, z) => el("input", { type: "number", min: a, max: z, value: v ?? "" });
-    const maxJ = num(c.max_janelas, 1, 24), maxM = num(c.max_mensagens_par_10min, 5, 300), maxA = num(c.max_arquivo_mb, 1, 2000);
+    const maxJ = num(c.max_janelas, 1, 64), maxM = num(c.max_mensagens_par_10min, 5, 300), maxA = num(c.max_arquivo_mb, 1, 2000);
     const contexto = el("textarea", { rows: 6, placeholder: "Texto que entra no prompt de todas as janelas: o mapa dos sistemas da empresa, regras da casa, quem cuida do quê…" });
     contexto.value = c.contexto || "";
-    let atualizar = c.atualizar_sozinho, pensamento = c.pensamento_no_palco !== false;
+    let atualizar = c.atualizar_sozinho, pensamento = c.pensamento_no_palco !== false, diario = c.diario_no_cerebro !== false;
     const salvar = async () => {
+      // o valor da variável do token vai para o servidor: endereço ou variável novos pedem confirmação
+      const url = cerUrl.value.trim(), token = cerToken.value.trim();
+      if (url && token && (url !== (c.cerebro.url || "") || token !== (c.cerebro.token_env || ""))) {
+        let host = url;
+        try { host = new URL(url).host; } catch { /* o main recusa o endereço inválido */ }
+        if (!confirm(`O Engram vai mandar o valor da variável ${token} para ${host} sempre que ler o cérebro no servidor. Confirma?`)) return;
+      }
       const corpo = {
         pasta_trabalho: pasta.value, max_janelas: maxJ.value, max_mensagens_par_10min: maxM.value, max_arquivo_mb: maxA.value,
-        contexto: contexto.value, atualizar_sozinho: atualizar, pensamento_no_palco: pensamento,
-        cerebro: fonte === "remoto" ? { fonte, url: cerUrl.value, token_env: cerToken.value, ca: cerCa.value, pasta_remota: cerRemota.value, servidor: cerServidor.value } : { fonte, pasta: cerPasta.value },
+        contexto: contexto.value, atualizar_sozinho: atualizar, pensamento_no_palco: pensamento, diario_no_cerebro: diario,
+        // as duas configurações vão juntas: salvar uma não apaga a outra
+        cerebro: { pasta: cerPasta.value, url: cerUrl.value, token_env: cerToken.value, ca: cerCa.value, pasta_remota: cerRemota.value, servidor: cerServidor.value },
       };
       try {
         const r = await api("/api/config", { json: corpo });
-        if (r.reiniciar) avisar({ texto: "Salvo. O cérebro novo entra quando o Engram reiniciar (os agentes continuam rodando).", cor: "#ffc857", tempo: 8000 });
+        if (r.aviso) avisar({ texto: `Salvo, mas: ${r.aviso}`, cor: "#ffc857", tempo: 9000 });
         else avisar({ texto: "Ajustes salvos", cor: "#4ade9f" });
         await this.carregar();
       } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d", tempo: 7000 }); }
@@ -138,16 +160,19 @@ export class PainelGeral {
       el("section", { class: "aj-grupo" }, el("h3", { text: "Onde os agentes trabalham" }),
         el("div", { class: "aj-campo" }, el("span", { text: "Pasta de trabalho" }), el("div", { class: "linha" }, pasta, escolher(pasta, "Pasta de trabalho dos agentes")),
           el("small", { class: "aj-dica", text: "É onde cada janela nova abre. Janelas já abertas continuam onde estão." }))),
-      el("section", { class: "aj-grupo" }, el("h3", { text: "Cérebro" }), seg, blocoPasta, blocoRemoto,
-        c.cerebro_pendente ? el("div", { class: "aj-pendente" },
-          el("span", { text: "Salvo. Falta reiniciar o Engram para o cérebro novo entrar (os agentes continuam rodando)." }),
-          el("button", { type: "button", class: "btn-brilho pequeno", onclick: () => this.aoReiniciar?.() }, el("span", { text: "Reiniciar agora" }))) : null,
-        el("small", { class: "aj-dica", text: `O normal é a pasta neste computador. O servidor remoto é para quem já tem as notas num servidor próprio, com as ferramentas arquivos_listar e arquivos_ler. Em uso agora: ${c.cerebro_fonte_ativa === "remoto" ? "servidor remoto" : "pasta neste computador"}.` })),
+      el("section", { class: "aj-grupo" }, el("h3", { text: "Cérebro" }),
+        titulo("Em uso agora (troca na hora, sem reiniciar; o mesmo seletor fica no topo, ao lado da sincronização)"), seg,
+        servidor.erro ? el("small", { class: "aj-dica aj-erro", text: `Última tentativa no servidor: ${servidor.erro}`, style: { display: "block", color: "#ff8a9a", marginTop: "6px" } }) : null,
+        titulo("Pasta neste computador"), blocoPasta,
+        titulo("Servidor (avançado)"), blocoRemoto,
+        el("small", { class: "aj-dica", text: "As duas ficam guardadas: alternar não apaga a outra. O servidor é para quem já tem as notas num servidor próprio, com as ferramentas arquivos_listar e arquivos_ler. Mudou o endereço? Salve antes de alternar. Os agentes abertos recebem um aviso na próxima mensagem dizendo onde ler e gravar." })),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Limites" }),
-        el("div", { class: "aj-campos tres" }, campo("Janelas abertas ao mesmo tempo", maxJ), campo("Mensagens entre dois agentes a cada 10 min", maxM, "Trava contra dois agentes respondendo um ao outro em loop."), campo("Tamanho máximo de arquivo (MB)", maxA))),
+        el("div", { class: "aj-campos tres" }, campo("Janelas abertas ao mesmo tempo", maxJ, "Vale para você e para o maestro (criar_agente)."), campo("Mensagens entre dois agentes a cada 10 min", maxM, "Trava contra dois agentes respondendo um ao outro em loop."), campo("Tamanho máximo de arquivo (MB)", maxA))),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Palco" }),
         el("label", { class: "aj-opcao" }, (() => { const i = el("input", { type: "checkbox", checked: pensamento, onchange: e => { pensamento = e.target.checked; } }); return el("span", { class: "chave" }, i, el("span")); })(),
-          el("span", {}, "Mostrar o código sendo escrito em cima do cartão ", el("small", { text: "(a bolha some sozinha; clicar nela abre o Visualizar trabalho)" })))),
+          el("span", {}, "Mostrar o código sendo escrito em cima do cartão ", el("small", { text: "(a bolha some sozinha; clicar nela abre o Visualizar trabalho)" }))),
+        el("label", { class: "aj-opcao" }, (() => { const i = el("input", { type: "checkbox", checked: diario, onchange: e => { diario = e.target.checked; } }); return el("span", { class: "chave" }, i, el("span")); })(),
+          el("span", {}, "Anotar delegações e devolutivas no cérebro ", el("small", { text: "(uma linha por tarefa na nota do dia, sessoes/diario-AAAA-MM-DD; só o assunto e um resumo curto, sem dado pessoal)" })))),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Contexto para todos os agentes" }), el("div", { class: "aj-campo" }, contexto)),
       el("section", { class: "aj-grupo" }, el("h3", { text: "Atualização" }), this.blocoAtualizacao(),
         el("label", { class: "aj-opcao" }, (() => { const i = el("input", { type: "checkbox", checked: atualizar, onchange: e => { atualizar = e.target.checked; } }); return el("span", { class: "chave" }, i, el("span")); })(),

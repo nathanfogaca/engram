@@ -14,6 +14,9 @@
 <link rel="stylesheet" href="previa.css">
 <link rel="stylesheet" href="setores.css">
 <link rel="stylesheet" href="automacoes.css">
+<link rel="stylesheet" href="palcos.css">
+<link rel="stylesheet" href="quadro.css">
+<link rel="stylesheet" href="cenas.css">
 </head>
 <body>
 <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -54,6 +57,11 @@
 
   <div class="acoes">
     <button class="atualizacao" id="atualizacao" hidden></button>
+    <div class="fonte" id="fonte" role="group" aria-label="De onde vem o cérebro">
+      <span class="fonte-pilula" aria-hidden="true"></span>
+      <button class="fonte-op" id="fonte-remoto" data-fonte="remoto" title="Cérebro do servidor"><span class="fonte-ponto"></span>Servidor <span class="fonte-nome" id="fonte-nome"></span></button>
+      <button class="fonte-op" id="fonte-pasta" data-fonte="pasta" title="Cérebro numa pasta deste computador"><span class="fonte-ponto"></span>Local</button>
+    </div>
     <button class="sinc" id="sinc" title="Sincronizar o cérebro com o servidor"><span class="sinc-ponto"></span><span id="sinc-texto">—</span></button>
     <button class="btn btn-contas" id="btn-contas" title="Ajustes: geral, aparência, contas, MCPs e skills (Ctrl+,)"><span class="contas-pontos" id="contas-pontos"></span>Ajustes</button>
     <button class="btn" id="btn-time" title="Janelas abertas e anteriores">Time</button>
@@ -65,6 +73,7 @@
 <!-- ================================================================ palco -->
 <section class="vista" id="palco">
   <div class="grade" id="grade"></div>
+  <div class="palco-varrido" id="palco-varrido" aria-hidden="true"><b id="palco-varrido-nome"></b></div>
   <div class="mundo" id="mundo">
     <div id="setores"></div>
     <svg class="fios" id="fios" aria-hidden="true">
@@ -94,12 +103,33 @@
     </div>
   </div>
 
+  <section class="folha" id="folha" aria-label="Quadro de tarefas" aria-hidden="true">
+    <div class="folha-cab">
+      <h2><span class="ico-quadro"><i></i><i></i><i></i></span>Quadro de tarefas<small id="folha-palco"></small></h2>
+      <div class="q-abas" id="q-abas"><button data-aba="quadro" class="on">Quadro</button><button data-aba="diario">Diário no cérebro</button></div>
+      <div class="q-contadores" id="q-contadores"></div>
+      <div class="q-filtro" id="q-filtro"><button data-f="hoje" class="on">Hoje</button><button data-f="3">3 dias</button><button data-f="tudo">Tudo</button></div>
+      <button class="q-fechar" id="q-fechar" title="Fechar (Q)">×</button>
+    </div>
+    <div class="q-colunas" id="q-colunas"></div>
+    <div class="q-diario" id="q-diario" hidden></div>
+  </section>
+  <aside class="q-leitura" id="q-leitura" aria-hidden="true"></aside>
+  <section class="folha folha-cu" id="folha-cu" aria-label="Cenas e uso" aria-hidden="true"></section>
+
   <div class="hud">
     <span class="hud-dica" id="hud-dica">Arraste o fundo para mover · roda do mouse aproxima · ⤢ no cartão abre o leitor grande · Ferramentas: setor (S), automação (A), post-it (N)</span>
     <div class="hud-zoom">
+      <button class="btn-quadro" id="btn-quadro" title="Quadro de tarefas do maestro e diário (Q)" aria-expanded="false"><span class="ico-quadro"><i></i><i></i><i></i></span>Quadro<kbd>Q</kbd><span class="selo-quadro" id="selo-quadro" hidden></span></button>
+      <button class="btn-cenas" id="btn-cenas" title="Cenas: salvar o time e recriar com um clique"><span class="ic-cenas"><i></i><i></i><i></i><i></i></span>Cenas</button>
+      <button class="btn-uso" id="btn-uso" title="Uso: tokens e custo estimado por agente"><span class="ic-uso"><i></i><i></i><i></i></span>Uso</button>
       <div class="ferramentas" id="ferramentas">
-        <button class="btn-ferramentas" id="btn-ferramentas" title="Ferramentas do palco" aria-haspopup="menu" aria-expanded="false"><span class="ico-ferr">✦</span>Ferramentas<span class="seta">▴</span></button>
+        <button class="btn-ferramentas" id="btn-ferramentas" title="Ferramentas do palco" aria-haspopup="menu" aria-expanded="false"><span class="ico-ferr">✦</span>Ferramentas<span class="ferr-palco" id="ferr-palco" title="O palco que está na tela"></span><span class="selo" id="selo-ferr" hidden></span><span class="seta">▴</span></button>
         <div class="ferramentas-menu" id="ferramentas-menu" role="menu" hidden>
+          <div class="ferr-palcos" id="ferr-palcos">
+            <button class="ferr-item nao-fecha" id="btn-palcos" role="menuitem" aria-expanded="false" title="Até 3 palcos, cada um com os seus agentes, linhas, setores, post-its e automações. Trocar de palco não encerra ninguém."><span class="ferr-ico ferr-ico-palcos"><i></i><i></i><i></i></span><span class="ferr-txt"><b>Palcos</b><small id="palcos-resumo">Palco 1</small></span><span class="selo" id="selo-palcos" hidden></span><span class="seta-palcos">▾</span></button>
+            <div class="palcos-lista" id="palcos-lista" hidden></div>
+          </div>
           <button class="ferr-item" id="btn-setor" role="menuitem" title="Desenhar um setor · ou Shift + arrastar no fundo · ou Ctrl + clique nos cartões"><span class="ferr-ico ferr-ico-setor"></span><span class="ferr-txt"><b>Setor</b><small>Área com nome e instrução para um grupo de agentes</small></span><kbd>S</kbd></button>
           <button class="ferr-item" id="btn-automacao" role="menuitem"><span class="ferr-ico"><span class="relogio"></span></span><span class="ferr-txt"><b>Automação</b><small>Orientação com horário, ligada a um agente</small></span><kbd>A</kbd></button>
           <button class="ferr-item" id="btn-postit" role="menuitem"><span class="ferr-ico ferr-ico-postit"></span><span class="ferr-txt"><b>Post-it</b><small>Nota solta no palco; pode virar automação</small></span><kbd>N</kbd></button>
@@ -225,6 +255,7 @@
 </dialog>
 
 <div class="menu-fio" id="menu-fio" hidden></div>
+<div id="veus"></div>
 <div class="avisos" id="avisos" aria-live="polite"></div>
 
 <div class="sem-acesso" id="sem-acesso" hidden>

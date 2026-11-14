@@ -57,7 +57,7 @@ export class Automacoes {
     const botao = $("#btn-ferramentas"), menu = $("#ferramentas-menu");
     const abrir = on => { menu.hidden = !on; botao.classList.toggle("aberto", on); botao.setAttribute("aria-expanded", String(on)); };
     botao.onclick = e => { e.stopPropagation(); abrir(menu.hidden); };
-    menu.addEventListener("click", e => { if (e.target.closest(".ferr-item")) abrir(false); });
+    menu.addEventListener("click", e => { if (e.target.closest(".ferr-item:not(.nao-fecha)")) abrir(false); });
     document.addEventListener("pointerdown", e => { if (!e.target.closest("#ferramentas")) abrir(false); });
     $("#btn-automacao").onclick = () => this.nova();
     $("#btn-postit").onclick = () => this.novoPostit();
@@ -69,6 +69,15 @@ export class Automacoes {
   carregar(automacoes, postits) {
     for (const p of postits || []) this.receberPostit(p);
     for (const a of automacoes || []) this.receber(a);
+  }
+
+  /** Troca de palco: automações e post-its do palco que sai saem da tela. */
+  limpar() {
+    this.fecharPainel();
+    for (const a of this.lista.values()) { a.fio?.g.remove(); a.el.remove(); }
+    this.lista.clear();
+    for (const p of this.postits.values()) { clearTimeout(p.timer); p.el.remove(); }
+    this.postits.clear();
   }
 
   /** Uma automação criada ou mudada (pela tela ou pelo app). */
@@ -360,7 +369,7 @@ export class Automacoes {
     let nome = dados.nome || "Nova automação";
     for (let i = 2; [...this.lista.values()].some(a => a.nome.toLowerCase() === nome.toLowerCase()); i++) nome = `${dados.nome || "Nova automação"} ${i}`;
     try {
-      const d = await api("/api/automacoes", { json: { ...this.lugarLivre(300, 230), dias: [1, 2, 3, 4, 5], hora: "09:00", ...dados, nome } });
+      const d = await api("/api/automacoes", { json: { ...this.lugarLivre(300, 230), dias: [1, 2, 3, 4, 5], hora: "09:00", ...dados, nome, palco: this.palco.n } });
       const a = this.receber(d, { nascendo: true });
       this.selecionar(a);
       this.mostrar(a);
@@ -389,9 +398,9 @@ export class Automacoes {
     this.pintarPainel();
     clearTimeout(a.timerSalvar);
     a.timerSalvar = setTimeout(async () => {
-      const { nome, instrucao, dias, hora, manual, perdida, aviso } = a;
+      const { nome, instrucao, dias, hora, manual, perdida, aviso, nota_no_cerebro } = a;
       try {
-        await api(`/api/automacoes/${a.id}`, { method: "PUT", json: { nome, instrucao, dias, hora, manual, perdida, aviso } });
+        await api(`/api/automacoes/${a.id}`, { method: "PUT", json: { nome, instrucao, dias, hora, manual, perdida, aviso, nota_no_cerebro: !!nota_no_cerebro } });
         this.erro(a, null);
       } catch (e) { this.erro(a, e.message); }
       if (a.versao === versao) a.salvando = false;
@@ -441,6 +450,7 @@ export class Automacoes {
     this.elPerdida = opcoes("perdida", [["rodar", "Roda quando abrir"], ["pular", "Pula a vez"]]);
     this.campoPerdida = el("div", { class: "ap-campo" }, el("span", { class: "ap-rotulo", text: "Se o Engram estava fechado no horário" }), this.elPerdida);
     this.campoAviso = el("input", { type: "checkbox" });
+    this.campoNota = el("input", { type: "checkbox" });
     this.elRecebe = el("div", { class: "ap-recebe" });
     this.elDevolutiva = el("div", { class: "ap-devolutiva conv-md" });
     this.campoDevolutiva = el("div", { class: "ap-campo" }, this.rotuloDevolutiva = el("span", { class: "ap-rotulo" }), this.elDevolutiva);
@@ -454,6 +464,7 @@ export class Automacoes {
       el("div", { class: "ap-campo" }, el("span", { class: "ap-rotulo", text: "Vai para" }), this.elVai),
       this.campoPerdida,
       el("label", { class: "ap-marca" }, this.campoAviso, "Aviso do Windows quando terminar ou parar"),
+      el("label", { class: "ap-marca", title: "Cada devolutiva vira uma nota em automacoes/<nome>/ no cérebro, para qualquer agente achar depois" }, this.campoNota, "Guardar a devolutiva como nota no cérebro (e-mail, CPF, telefone e senhas saem mascarados)"),
       el("div", { class: "ap-campo" }, el("span", { class: "ap-rotulo", text: "O que o agente recebe" }), this.elRecebe),
       this.campoDevolutiva,
       el("div", { class: "ap-campo" }, el("span", { class: "ap-rotulo", text: "Histórico" }), this.elHistorico),
@@ -471,6 +482,7 @@ export class Automacoes {
     this.campoHora.addEventListener("change", () => { if (this.campoHora.value && sel()) this.editar(sel(), { hora: this.campoHora.value }); });
     this.elPerdida.addEventListener("click", e => { const b = e.target.closest("button"); if (b && sel()) this.editar(sel(), { perdida: b.dataset.v }); });
     this.campoAviso.addEventListener("change", () => sel() && this.editar(sel(), { aviso: this.campoAviso.checked }));
+    this.campoNota.addEventListener("change", () => sel() && this.editar(sel(), { nota_no_cerebro: this.campoNota.checked }));
     this.painel.addEventListener("pointerdown", e => e.stopPropagation());
     this.painel.addEventListener("keydown", e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this.fecharPainel(); } });
     this.palco.raiz.append(this.painel);
@@ -503,6 +515,7 @@ export class Automacoes {
     this.elHorario.hidden = a.manual;
     this.campoPerdida.hidden = a.manual;
     this.campoAviso.checked = a.aviso;
+    this.campoNota.checked = !!a.nota_no_cerebro;
     const c = a.alvo ? this.palco.cartoes.get(a.alvo) : null;
     this.elVai.classList.toggle("nenhum", !c);
     if (c) this.elVai.replaceChildren(el("i", { style: { "--c": c.cor } }), c.info.nome, c.info.papel === "maestro" ? " · maestro, distribui para o time" : "");
@@ -512,7 +525,7 @@ export class Automacoes {
     this.campoDevolutiva.hidden = !ultimaOk;
     if (ultimaOk && this.elDevolutiva.dataset.n !== String(ultimaOk.n)) {
       this.elDevolutiva.dataset.n = String(ultimaOk.n);
-      this.elDevolutiva.innerHTML = window.markdownit({ html: false, linkify: true }).render(ultimaOk.devolutiva); // HTML desligado no markdown-it
+      this.elDevolutiva.innerHTML = window.markdownit({ html: false, linkify: true }).disable("image").render(ultimaOk.devolutiva); // HTML desligado no markdown-it
       for (const l of this.elDevolutiva.querySelectorAll("a")) { l.target = "_blank"; l.rel = "noopener noreferrer"; }
       this.rotuloDevolutiva.textContent = `Última devolutiva · ${quando(ultimaOk.fim || ultimaOk.inicio)}`;
     }
@@ -585,7 +598,7 @@ export class Automacoes {
 
   async novoPostit() {
     try {
-      const p = this.receberPostit(await api("/api/postits", { json: { texto: "", ...this.lugarLivre(210, 150) } }), true);
+      const p = this.receberPostit(await api("/api/postits", { json: { texto: "", ...this.lugarLivre(210, 150), palco: this.palco.n } }), true);
       this.mostrar(p);
       setTimeout(() => p.elTexto.focus({ preventScroll: true }), 80);
     } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); }

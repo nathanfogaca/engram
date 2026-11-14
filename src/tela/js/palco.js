@@ -9,6 +9,7 @@ import {
 import { Conversa } from "./conversa.js";
 import { Setores } from "./setores.js";
 import { Automacoes } from "./automacoes.js";
+import { textoChipUso, semMedidor, NOTA_CUSTO } from "./uso.js";
 
 const TAM = { w: 700, h: 470 };
 const ROTULO = {
@@ -30,10 +31,12 @@ export class Palco {
     this.camadaLemb = $("#lembrancas");
     this.v = { x: innerWidth / 2 - TAM.w / 2, y: innerHeight / 2 - TAM.h / 2 + 30, z: 1 };
     this.cartoes = new Map();
+    this.chips = new Map(); // id do agente → tarefa em aberto dele (o Quadro preenche)
     this.fios = new Map();
     this.pendentes = new Map(); // ligações que chegaram antes de um dos cartões: desenhadas quando ele nascer
     this.brilhos = new Set();
     this.topo = 10;
+    this.n = 1; // o palco que está na tela (1 a 3); criações mandam este número
     this.gesto = null;
     this.aoAbrirNota = aoAbrirNota;
     this.aoRetomar = aoRetomar;
@@ -127,22 +130,23 @@ export class Palco {
     const x2 = Math.max(...lista.map(c => c.x + c.w)), y2 = Math.max(...lista.map(c => c.y + c.h));
     // as etiquetas dos setores ficam acima deles e não encolhem com o zoom: reserva espaço na tela
     const etiqueta = this.setores?.lista.size ? 90 : 0;
-    const z = limitar(Math.min((innerWidth - 120) / (x2 - x1), (innerHeight - 200 - etiqueta) / (y2 - y1), 1), 0.15, 1);
-    this.v = { z, x: innerWidth / 2 - ((x1 + x2) / 2) * z, y: (innerHeight + 50 + etiqueta) / 2 - ((y1 + y2) / 2) * z };
+    const reserva = this.reservaBaixo || 0; // o quadro de tarefas aberto ocupa a parte de baixo
+    const z = limitar(Math.min((innerWidth - 120) / (x2 - x1), (innerHeight - 200 - etiqueta - reserva) / (y2 - y1), 1), 0.15, 1);
+    this.v = { z, x: innerWidth / 2 - ((x1 + x2) / 2) * z, y: (innerHeight + 50 + etiqueta - reserva) / 2 - ((y1 + y2) / 2) * z };
     this.aplicar(animado);
   }
 
   /** O maestro organizou o palco: os cartões deslizam até o lugar novo e a vista enquadra o time. */
-  reposicionar(posicoes) {
+  reposicionar(posicoes, enquadrar = true) {
     const voos = (posicoes || []).map(p => ({ c: this.cartoes.get(p.id), p })).filter(v => v.c)
       .map(({ c, p }) => ({ c, de: { x: c.x, y: c.y, w: c.w, h: c.h }, para: { x: p.x, y: p.y, w: p.w || c.w, h: p.h || c.h } }));
     if (!voos.length) return;
     cancelAnimationFrame(this.quadroVoo);
     const fim = () => {
-      for (const { c } of voos) this.ajustarTerm(c);
+      for (const { c } of voos) { this.ajustarTerm(c); this.dissolverEncerradosSob(c); }
       this.redesenharFios();
       this.setores.atualizarMembros();
-      this.enquadrar(true);
+      if (enquadrar) this.enquadrar(true);
     };
     if (movimentoReduzido) {
       for (const { c, para } of voos) { Object.assign(c, para); this.posicionar(c); }
@@ -245,16 +249,35 @@ export class Palco {
   // ---------------------------------------------------------------- cartões
 
   carregar({ janelas, conexoes, setores, automacoes, postits }) {
+    this.carregando = true;
     janelas.forEach((info, i) => {
       const c = this.adicionar(info);
       if (c) c.el.style.animationDelay = `${i * 90}ms`;
     });
+    this.carregando = false;
     this.setores.carregar(setores);
     this.automacoes.carregar(automacoes, postits);
     setTimeout(() => {
       for (const { a, b, revisa } of conexoes) { this.ligar(a, b, { nascendo: true }); if (revisa) this.marcarRevisao(a, b, revisa); }
     }, janelas.length * 90 + 350);
     if (janelas.length) this.enquadrar(false);
+  }
+
+  /** Troca de palco: tira da tela tudo o que é do palco que sai. Os agentes dele seguem rodando; só deixam de aparecer. */
+  limpar() {
+    cancelAnimationFrame(this.quadroVoo);
+    for (const c of this.cartoes.values()) { this.esconderBolha(c); c.ws?.fechar(); c.term?.dispose(); c.el.remove(); }
+    this.cartoes.clear();
+    for (const f of this.fios.values()) { f.g.remove(); f.grad.remove(); }
+    this.fios.clear();
+    this.pendentes.clear();
+    this.camadaLemb.replaceChildren();
+    this.gPart.replaceChildren();
+    this.gesto = null;
+    this.fecharMenu();
+    this.setores.limpar();
+    this.automacoes.limpar();
+    this.atualizarVazio();
   }
 
   lugarNoCentro() {
@@ -283,6 +306,8 @@ export class Palco {
     const maestro = info.papel === "maestro";
     c.elNome = el("span", { class: "cab-nome", text: info.nome, title: info.nome });
     c.elEstado = el("span", { class: "estado" });
+    c.elUso = el("button", { class: "chip-uso", hidden: true, type: "button" });
+    c.elUso.onclick = e => { e.stopPropagation(); this.aoUso?.(c.id); };
     c.btnConversa = el("button", { class: "ativo", text: "Conversa", title: "Texto legível (não gasta token)" });
     c.btnTerminal = el("button", { text: "Terminal", title: `O terminal de verdade do ${info.agente || "agente"}` });
     const btnLer = el("button", { class: "cab-btn", title: "Abrir no leitor grande", text: "⤢" });
@@ -293,11 +318,13 @@ export class Palco {
       el("span", { class: `tag${maestro ? " maestro" : ""}`, text: maestro ? "♛ Maestro" : nomePapel(info.papel) }),
       info.provedor && info.provedor !== "claude" ? el("span", { class: "tag agente", text: info.agente || info.provedor }) : null,
       el("span", { class: "tag modelo", text: info.nome_modelo || nomeModelo(info.modelo) }),
-      c.elEstado,
+      c.elUso, c.elEstado,
       el("div", { class: "modos" }, c.btnConversa, c.btnTerminal),
       btnTrabalho, btnLer, btnFechar);
     c.conv = new Conversa(info.id, { cor, nome: info.nome, aoTerminal: () => this.modo(c, "terminal") });
     c.elTerm = el("div", { class: "term", hidden: true });
+    c.elChip = el("div", { class: "chip-tarefa", hidden: true, title: "A tarefa que o maestro delegou: abrir no Quadro" });
+    c.elChip.onclick = () => { const t = this.chips.get(c.id); if (t) this.aoChip?.(t); };
     c.elAcao = el("span", { class: "acao" });
     c.elCaixa = el("span", { class: "caixa" });
     const portas = ["d", "e", "c", "b"].map(lado =>
@@ -306,7 +333,7 @@ export class Palco {
     c.el = el("div", { class: "cartao", "data-id": info.id, style: { "--cor": cor } },
       el("div", { class: "anel" }, el("i")),
       el("div", { class: "cartao-fundo" }),
-      cab,
+      cab, c.elChip,
       el("div", { class: "corpo" }, c.conv.el, c.elTerm),
       el("div", { class: "rodape" }, c.elAcao, c.elCaixa),
       ...portas, redim);
@@ -361,13 +388,51 @@ export class Palco {
     });
 
     c.conv.carregar();
+    this.pintarChip(c);
+    this.pintarUso(c);
     this.marcarEstado(c, c.viva ? info.estado : "encerrada");
     if (info.pergunta) c.conv.pergunta(info.pergunta);
     if (!c.viva) this.marcarEncerrada(c.id);
     else if (info.tem_conversa === false) this.modo(c, "terminal"); // este CLI não deixa a conversa num arquivo legível
     this.atualizarVazio();
+    if (c.viva && !this.carregando) this.dissolverEncerradosSob(c);
     return c;
   }
+
+  /** O chip da tarefa no cartão: o que o maestro delegou a este agente e em que pé está. */
+  pintarChip(c) {
+    const t = this.chips.get(c.id);
+    if (!t) { c.elChip.hidden = true; c.elChip.dataset.est = ""; return; }
+    const chave = `${t.n}:${t.estado}`;
+    c.elChip.hidden = false;
+    c.elChip.style.setProperty("--tc", `var(--c-${t.estado})`);
+    c.elChip.replaceChildren(el("i"), el("span", { text: t.assunto }), el("b", { text: t.rotulo || t.estado }));
+    if (c.elChip.dataset.est !== chave && !this.carregando) {
+      c.elChip.classList.remove("novo");
+      void c.elChip.offsetWidth;
+      if (!movimentoReduzido) c.elChip.classList.add("novo");
+    }
+    c.elChip.dataset.est = chave;
+  }
+
+  /** O chip de uso no cabeçalho: só entrada e saída da conversa (o resto fica no painel Uso). */
+  pintarUso(c, pulsar = false) {
+    const t = textoChipUso(c.info);
+    const sem = !t && semMedidor(c.info);
+    c.elUso.hidden = !t && !sem;
+    if (!t && !sem) return;
+    const texto = sem ? "sem medidor" : t;
+    c.elUso.classList.toggle("sem", sem);
+    c.elUso.style.setProperty("--uc", c.cor);
+    c.elUso.title = sem ? "Este agente ainda não grava a conversa num arquivo que o Engram lê" : `Tokens da conversa (entrada ↓ e saída ↑). Clique para ver o painel de uso.
+${NOTA_CUSTO}`;
+    if (c.elUso.textContent !== texto) {
+      c.elUso.textContent = texto;
+      if (pulsar && !movimentoReduzido) { c.elUso.classList.remove("pulsa"); void c.elUso.offsetWidth; c.elUso.classList.add("pulsa"); }
+    }
+  }
+
+  pintarChips() { for (const c of this.cartoes.values()) this.pintarChip(c); }
 
   modo(c, modo) {
     if (c.modo === modo) return;
@@ -399,6 +464,12 @@ export class Palco {
       this.flash(c, c.cor);
     }
     c.info = info;
+    this.pintarUso(c);
+    const q = info.posicao;
+    // só a retomada (o main muda a posição ao reabrir) move o cartão; e nunca logo depois de a pessoa mexer nele (o PUT pode não ter gravado)
+    if (q && info.aberta && !c.viva && Date.now() > (c.posLocalAte || 0) && this.gesto?.c !== c && ["x", "y", "w", "h"].every(k => Number.isFinite(q[k])) && ["x", "y", "w", "h"].some(k => Math.abs(q[k] - c[k]) > 1)) {
+      this.reposicionar([{ id: c.id, ...q }], false);
+    }
     if (info.aberta && !c.viva) this.reviver(c);
     else if (!info.aberta && c.viva) this.marcarEncerrada(c.id);
   }
@@ -450,6 +521,7 @@ export class Palco {
   }
 
   salvarPosicao(c) {
+    c.posLocalAte = Date.now() + 2000;
     api(`/api/posicoes/${c.id}`, {
       method: "PUT", json: { x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h) },
     }).catch(() => {});
@@ -505,6 +577,7 @@ export class Palco {
     if (c.modo === "terminal") this.conectarTerm(c);
     c.conv.carregar();
     this.flash(c, c.cor);
+    this.dissolverEncerradosSob(c);
   }
 
   remover(id) {
@@ -517,10 +590,22 @@ export class Palco {
     this.setores.selecao.delete(id);
     this.setores.atualizarMembros(false);
     c.ws?.fechar();
-    c.el.style.transition = "transform .45s var(--suave), opacity .45s";
+    const ms = movimentoReduzido ? 0 : 450;
+    c.el.style.pointerEvents = "none";
+    c.el.style.transition = `transform ${ms}ms var(--suave), opacity ${ms}ms, filter ${ms}ms`;
     c.el.style.transform = "scale(.88)";
+    c.el.style.filter = "blur(6px)";
     c.el.style.opacity = "0";
-    setTimeout(() => { c.term?.dispose(); c.el.remove(); this.atualizarVazio(); }, 460);
+    setTimeout(() => { c.term?.dispose(); c.el.remove(); this.atualizarVazio(); }, ms + 10);
+  }
+
+  /** Um cartão vivo parou aqui: os encerrados que ele cobre se dissolvem (a conversa continua salva, dá para retomar pela gaveta). */
+  dissolverEncerradosSob(vivo) {
+    if (!vivo?.viva || !this.cartoes.has(vivo.id)) return;
+    for (const o of [...this.cartoes.values()]) {
+      if (o === vivo || o.viva !== false) continue;
+      if (vivo.x < o.x + o.w && o.x < vivo.x + vivo.w && vivo.y < o.y + o.h && o.y < vivo.y + vivo.h) this.remover(o.id);
+    }
   }
 
   async encerrar(c) {

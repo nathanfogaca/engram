@@ -5,6 +5,10 @@ import {
   COR_LIGACAO, encurtar,
 } from "./util.js";
 import { Palco } from "./palco.js";
+import { Palcos } from "./palcos.js";
+import { FonteCerebro } from "./fonte.js";
+import { Quadro } from "./quadro.js";
+import { Cenas } from "./cenas.js";
 import { Cerebro } from "./cerebro.js";
 import { Gaveta } from "./gaveta.js";
 import { Leitor } from "./conversa.js";
@@ -16,7 +20,7 @@ import { VistaCodigo } from "./codigo.js";
 import { VistaFluxos } from "./fluxos.js";
 import { PainelPrevia, temPrevia } from "./previa.js";
 
-let palco, cerebro, gaveta, leitor, contas, ajustes, codigo, fluxos, previa;
+let palco, palcos, quadro, cenas, fonteCerebro, cerebro, gaveta, leitor, contas, ajustes, codigo, fluxos, previa;
 let idsNotas = new Set();
 let contagemTipos = {};
 
@@ -48,8 +52,11 @@ async function abrirNota(id) {
   if (app.vista === "cerebro") cerebro.focar(id);
 }
 
-function focarAgente(id) {
+async function focarAgente(id) {
   trocarVista("palco");
+  // o agente está em outro palco: vai até lá primeiro (ninguém é encerrado ou movido por isso)
+  const n = palcos?.mapa.get(id)?.palco;
+  if (n && n !== palcos.atual && !(await palcos.trocar(n))) return;
   setTimeout(() => palco.focar(id), app.vista === "palco" ? 0 : 200);
 }
 
@@ -165,7 +172,7 @@ async function confirmarAgente() {
   trocarVista("palco");
   try {
     const info = await api("/api/sessoes", { json: {
-      nome: $("#ag-nome").value, modelo, papel, provedor, mcps, posicao: palco.lugarNoCentro(),
+      nome: $("#ag-nome").value, modelo, papel, provedor, mcps, posicao: palco.lugarNoCentro(), palco: palco.n,
     } });
     palco.adicionar(info);
     setTimeout(() => palco.focar(info.id), 120);
@@ -178,9 +185,9 @@ async function confirmarAgente() {
 async function retomar(s) {
   trocarVista("palco");
   try {
-    const info = await api("/api/sessoes", { json: { nome: s.nome, modelo: s.modelo, papel: s.papel, retomar: s.id } });
+    const info = await api("/api/sessoes", { json: { nome: s.nome, modelo: s.modelo, papel: s.papel, retomar: s.id, palco: palco.n } });
     if (palco.cartoes.has(info.id)) palco.atualizar(info);
-    else palco.adicionar(info);
+    else if (!Number.isInteger(info.palco) || info.palco === palco.n) palco.adicionar(info);
     setTimeout(() => palco.focar(info.id), 150);
     if (info.conversa_nova) avisar({ texto: `${info.nome} não tinha conversa gravada para retomar, então começou uma nova.`, cor: "#ffc857", tempo: 7000 });
     if (gaveta.aba === "time" && gaveta.aberta) gaveta.time();
@@ -253,6 +260,15 @@ function mostrarSinc(m) {
   const r = m.resultado || {};
   const erro = r.erro || m.erro;
   botao.classList.toggle("erro", !m.rodando && !!erro);
+  const prog = m.progresso;
+  if (m.rodando && prog && prog.total) {
+    // sinc longa (primeira leitura de uma fonte): mostra que está andando
+    texto.textContent = `lendo ${prog.lidas} de ${prog.total}`;
+    botao.style.setProperty("--prog", `${Math.min(100, Math.round((prog.lidas / prog.total) * 100))}%`);
+    botao.title = "Lendo o cérebro desta fonte pela primeira vez: as notas vão aparecendo na constelação";
+    return;
+  }
+  botao.style.removeProperty("--prog");
   if (m.rodando) { texto.textContent = "sincronizando…"; return; }
   if (erro) { texto.textContent = "cérebro fora"; botao.title = `Servidor do cérebro: ${erro}`; return; }
   if (r.total === undefined) return;
@@ -298,9 +314,15 @@ Ela também instala sozinha quando você não estiver usando a janela. Os agente
 
 // ------------------------------------------------------------------ ao vivo
 
+/** O aviso é texto corrido: tira a marcação do Markdown (**, `, #, lista) antes de encurtar. */
+const semMarkdown = t => String(t).replace(/[*_`]+/g, "").replace(/^\s*#+\s*/gm, "").replace(/^\s*[-•]\s+/gm, "").replace(/\s*\n\s*/g, " ");
+
 function nome(id) {
-  return palco.cartoes.get(id)?.info.nome || "?";
+  return palco.cartoes.get(id)?.info.nome || palcos?.nomeAgente(id) || "?";
 }
+
+// o que desenha no palco da tela: se chega no meio da troca de palco, espera a tela nova ficar pronta
+const DESENHA = new Set(["sessao", "evento", "conexao", "palco", "setor", "automacao", "postit", "mensagem", "pensamento", "conversa", "arquivos", "tarefa"]);
 
 function atualizarProvedores(dados) {
   for (const d of dados || []) {
@@ -312,7 +334,30 @@ function atualizarProvedores(dados) {
     el("i", { class: p.conectado ? "ok" : "sem", style: { "--c": COR_AGENTE[p.id] || "#a5b4fc" }, title: `${p.nome}: ${p.conectado ? "conectado" : "sem login"}` })));
 }
 
-function tratar(m) {
+function tratar(m, repetido = false) {
+  if (!repetido) {
+    palcos?.observar(m); // mapa, contagens e selos: até do que é de outro palco
+    if (palcos?.emTroca && DESENHA.has(m.tipo)) { palcos.fila.push(m); return; }
+  }
+  if (m.tipo === "cerebro_fonte") {
+    fonteCerebro?.aoVivo(m);
+    cerebro.trocouFonte?.(m);
+    if (m.acao === "trocado") carregarGrafo().catch(() => {}); // o índice da fonte nova já está no banco: não espera o "sinc"
+    return;
+  }
+  if (m.tipo === "palcos") return; // o nome mudou: o Palcos já cuidou
+  if (m.tipo === "tarefa") { quadro?.aoVivo(m); return; }
+  if (m.tipo === "cena") { cenas?.aoVivo(m); return; }
+  if (m.tipo === "uso") { cenas?.uso.aoVivo(m); return; }
+  if (palcos && !palcos.vale(m)) {
+    // sessão, setor, automação, post-it, linha ou organização de outro palco: não se desenha (já contou e selou acima)
+    if (m.tipo === "sessao") {
+      if (m.sessao?.aberta && palco.cartoes.has(m.sessao.id)) palco.remover(m.sessao.id); // a janela passou para outro palco: sai desta tela
+      agendarGrafo();
+      if (gaveta.aba === "time" && gaveta.aberta) gaveta.time();
+    }
+    return;
+  }
   if (m.tipo === "codigo") {
     codigo?.aoVivo(m);
   } else if (m.tipo === "previa") {
@@ -379,13 +424,13 @@ function tratar(m) {
     else if (m.acao === "revisao") palco.marcarRevisao(m.a, m.b, m.revisa);
     else palco.desligarLocal(m.a, m.b);
   } else if (m.tipo === "palco") {
-    if (m.acao === "organizado") palco.reposicionar(m.posicoes);
+    if (m.acao === "organizado") palco.reposicionar((m.posicoes || []).filter(p => palco.cartoes.has(p.id)));
   } else if (m.tipo === "setor") {
     if (m.acao === "salvo") palco.setores.receber(m.setor);
     else if (m.acao === "removido") palco.setores.removerLocal(m.id);
   } else if (m.tipo === "automacao") {
     if (m.acao === "removida") palco.automacoes.removerLocal(m.id);
-    else if (m.acao === "focar") { trocarVista("palco"); palco.automacoes.focar(m.id); }
+    else if (m.acao === "focar") { if (palco.automacoes.lista.has(m.id)) { trocarVista("palco"); palco.automacoes.focar(m.id); } }
     else if (m.automacao) palco.automacoes.receber(m.automacao, { devolveu: m.devolveu || null });
   } else if (m.tipo === "postit") {
     if (m.acao === "removido") palco.automacoes.removerPostitLocal(m.id);
@@ -395,13 +440,19 @@ function tratar(m) {
     if (m.fase === "enviada") {
       const auto = String(m.de).startsWith("auto:") ? palco.automacoes.lista.get(m.de.slice(5)) : null;
       const cor = auto ? "#ffc857" : palco.cartoes.get(m.de)?.cor || "#8b7bff";
-      avisar({ rota: `${auto ? `⏰ ${auto.nome}` : nome(m.de)} → ${nome(m.para)}`, texto: encurtar(m.texto || "", 110), cor });
+      // mensagem entre agentes de outro palco: o aviso leva o nome do palco (nunca "? → ?")
+      const fora = !auto && (!palco.cartoes.has(m.para) || !palco.cartoes.has(m.de));
+      const outro = fora ? palcos?.mapa.get(m.para)?.palco ?? palcos?.mapa.get(m.de)?.palco : null;
+      if (String(m.de).startsWith("auto:") && !auto) return; // automação de outro palco
+      if (fora && !palcos?.mapa.has(m.para) && !palcos?.mapa.has(m.de)) return; // ninguém conhecido: melhor não mostrar
+      avisar({ rota: `${outro && outro !== palcos.atual ? `${palcos.nomeDe(outro)} · ` : ""}${auto ? `⏰ ${auto.nome}` : nome(m.de)} → ${nome(m.para)}`, texto: encurtar(semMarkdown(m.texto || ""), 110), cor });
       if (!auto) cerebro.cometa(`sessao:${m.de}`, `sessao:${m.para}`, cor);
     }
   } else if (m.tipo === "cerebro") {
     agendarGrafo();
     const id = (m.mudou || "").split("/").pop().replace(/\.md$/i, "");
     if (gaveta.notaAberta === id && gaveta.aberta) gaveta.nota(id);
+    quadro?.cerebroMudou(m.mudou);
   } else if (m.tipo === "sinc") {
     mostrarSinc(m);
     if (!m.rodando) agendarGrafo();
@@ -426,11 +477,18 @@ async function iniciar() {
   app.papeis = e.papeis;
   app.maxJanelas = e.max_janelas;
 
-  gaveta = new Gaveta({ aoRetomar: retomar, aoFocarAgente: focarAgente, notaExiste: id => idsNotas.has(id) });
+  gaveta = new Gaveta({ aoRetomar: retomar, aoFocarAgente: focarAgente, notaExiste: id => idsNotas.has(id), nomePalco: n => palcos?.nomeDe(n) });
+  gaveta.palcoAtual = () => palcos?.atual;
   gaveta.aoAbrirNota = abrirNota;
   const abrirGaveta = gaveta.abrir.bind(gaveta);
   gaveta.abrir = () => { leitor?.fechar(); abrirGaveta(); }; // um painel lateral por vez
   palco = new Palco({ aoAbrirNota: abrirNota, aoRetomar: retomar, aoLer: abrirLeitor });
+  palcos = new Palcos({
+    palco,
+    aoAntes: () => leitor?.fechar(),
+    aoDepois: () => { quadro?.trocouPalco(); cenas?.trocouPalco(); agendarGrafo(); if (gaveta.aba === "time" && gaveta.aberta) gaveta.time(); },
+    aoRepetir: m => { try { tratar(m, true); } catch (e) { console.error(e); } },
+  });
   previa = new PainelPrevia();
   codigo = new VistaCodigo($("#codigo"), {
     agentes: () => [...palco.cartoes.values()].filter(c => c.viva).map(c => ({ id: c.info.id, nome: c.info.nome, estado: c.info.estado })),
@@ -451,6 +509,12 @@ async function iniciar() {
   });
   palco.aoNovo = papel => dialogoAgente(papel);
   cerebro = new Cerebro($("#cerebro-tela"), { aoAbrir: abrirNota, aoAgente: focarAgente });
+  quadro = new Quadro({ palco, palcos, aoAbrirNota: abrirNota });
+  cenas = new Cenas({ palco, palcos });
+  quadro.aoAbrir = () => cenas.fechar(true); // uma folha de baixo por vez
+  cenas.aoAbrir = () => quadro.abrir(false, true);
+  fonteCerebro = new FonteCerebro({});
+  fonteCerebro.carregar();
 
   for (const b of $$("#seg button")) b.onclick = () => trocarVista(b.dataset.vista);
   $("#btn-agente").onclick = () => dialogoAgente();
@@ -485,7 +549,7 @@ async function iniciar() {
     const noEditor = foco?.closest?.(".monaco-editor"); // o editor da vista Código tem os atalhos dele (Ctrl+K…)
     const digitando = foco?.matches?.("input, textarea, select") || noTerminal || noEditor || foco?.isContentEditable;
     if (app.vista === "codigo" && !document.querySelector("dialog[open]") && codigo.tecla(ev)) return;
-    if (app.vista === "palco" && ev.key === "Escape" && !digitando && (palco.setores.escape() || palco.automacoes.escape())) { ev.preventDefault(); return; }
+    if (app.vista === "palco" && ev.key === "Escape" && !digitando && (palco.setores.escape() || palco.automacoes.escape() || cenas.escape() || quadro.escape())) { ev.preventDefault(); return; }
     if ((ev.ctrlKey && ev.key.toLowerCase() === "k" && !noTerminal && !noEditor) || (ev.key === "/" && !digitando)) {
       ev.preventDefault();
       $("#busca").focus();
@@ -496,6 +560,8 @@ async function iniciar() {
       gaveta.fechar();
     } else if (!digitando && !ev.ctrlKey && !ev.altKey && ["1", "2", "3", "4"].includes(ev.key)) {
       trocarVista({ 1: "palco", 2: "cerebro", 3: "codigo", 4: "fluxos" }[ev.key]);
+    } else if (!digitando && !ev.ctrlKey && !ev.altKey && !ev.metaKey && app.vista === "palco" && ev.key.toLowerCase() === "q" && !document.querySelector("dialog[open]")) {
+      quadro.abrir(!quadro.aberto); // Q: abre e fecha o quadro de tarefas
     } else if (!digitando && !ev.ctrlKey && !ev.altKey && !ev.metaKey && app.vista === "palco" && ev.key.toLowerCase() === "s" && !document.querySelector("dialog[open]")) {
       palco.setores.alternarModo(); // S: desenhar um setor (de novo: sai do modo)
     } else if (!digitando && !ev.ctrlKey && !ev.altKey && !ev.metaKey && app.vista === "palco" && ["a", "n"].includes(ev.key.toLowerCase()) && !document.querySelector("dialog[open]")) {
@@ -512,9 +578,16 @@ async function iniciar() {
   mostrarSinc({ rodando: e.sinc.rodando, resultado: e.sinc.ultimo, erro: e.sinc.erro });
   $(".marca").title = `Engram ${e.versao}`;
   api("/api/atualizacao").then(mostrarAtualizacao).catch(() => {});
-  const [estadoPalco] = await Promise.all([api("/api/palco"), carregarGrafo()]);
+  // o palco que a pessoa estava olhando (o main guarda); sem a rota ainda, cai no palco 1 como antes
+  const atual = await palcos.carregar().catch(() => 1);
+  const [estadoPalco] = await Promise.all([api(`/api/palco?palco=${atual}`).catch(() => api("/api/palco")), carregarGrafo()]);
   palco.carregar(estadoPalco);
+  quadro.carregar();
   conectarAoVivo();
+  // um evento entre a primeira leitura e o conectarAoVivo se perde: relê o que o ao vivo teria trazido
+  api("/api/estado").then(e => mostrarSinc({ rodando: e.sinc.rodando, resultado: e.sinc.ultimo, erro: e.sinc.erro })).catch(() => {});
+  fonteCerebro.carregar();
+  palcos.carregar().catch(() => {});
   requestAnimationFrame(moverPilula);
 
   const alvo = location.hash.match(/^#nota=(.+)$/);

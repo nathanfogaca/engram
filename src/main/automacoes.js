@@ -7,7 +7,7 @@
 // automação roda quando ele abrir ou pula a vez, conforme a escolha da pessoa.
 
 const crypto = require('node:crypto');
-const { agora } = require('./banco');
+const { agora, PALCOS } = require('./banco');
 
 const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 const ABERTAS = "('rodando','parou')";
@@ -47,8 +47,9 @@ function resumir(texto) {
 }
 
 class Automacoes {
-  constructor({ db, janelas, avisar, notificar }) {
+  constructor({ db, janelas, avisar, notificar, diario = null }) {
     this.db = db;
+    this.diario = diario; // linha no diário do cérebro e, se a pessoa pedir, a devolutiva como nota
     this.janelas = janelas;
     this.avisar = avisar;
     this.notificar = notificar || (() => {});
@@ -64,9 +65,13 @@ class Automacoes {
 
   // ---------------------------------------------------------------- automações
 
-  linha(r) { return r ? { ...r, dias: r.dias ? r.dias.split(',').map(Number) : [], manual: !!r.manual, aviso: !!r.aviso } : null; }
+  linha(r) { return r ? { ...r, dias: r.dias ? r.dias.split(',').map(Number) : [], manual: !!r.manual, aviso: !!r.aviso, nota_no_cerebro: !!r.nota_no_cerebro } : null; }
   pegar(id) { return this.linha(this.q('SELECT * FROM automacoes WHERE id = ?').get(id)); }
-  todas() { return this.q('SELECT * FROM automacoes ORDER BY criado').all().map(r => this.linha(r)); }
+  /** As automações de um palco (sem palco: de todos; o relógio roda as de todos os palcos). */
+  todas(palco = null) {
+    const l = palco == null ? this.q('SELECT * FROM automacoes ORDER BY criado').all() : this.q('SELECT * FROM automacoes WHERE palco = ? ORDER BY criado').all(palco);
+    return l.map(r => this.linha(r));
+  }
   rodadas(id, limite = 10) { return this.q('SELECT * FROM automacao_rodadas WHERE automacao = ? ORDER BY n DESC LIMIT ?').all(id, limite).map(r => ({ ...r })); }
   rodadaAberta(id) {
     const r = this.q(`SELECT * FROM automacao_rodadas WHERE automacao = ? AND estado IN ${ABERTAS} ORDER BY n DESC LIMIT 1`).get(id);
@@ -79,7 +84,10 @@ class Automacoes {
     const { visto, criado, ...resto } = a;
     return { ...resto, rodadas: this.rodadas(a.id, 8) };
   }
-  lista() { return this.todas().map(a => this.paraTela(a)); }
+  lista(palco = null) { return this.todas(palco).map(a => this.paraTela(a)); }
+
+  /** O palco de uma automação nova: o que a tela pediu ou o que ela está mostrando. */
+  palcoNovo(b) { const n = Number(b.palco); return b.palco != null && Number.isInteger(n) && n >= 1 && n <= PALCOS ? n : this.janelas.cerebro.palcoAtual(); }
 
   validar(b, atual = {}) {
     const nome = String(b.nome ?? atual.nome ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
@@ -87,6 +95,9 @@ class Automacoes {
     if (this.todas().some(x => x.id !== atual.id && x.nome.toLowerCase() === nome.toLowerCase())) throw new Error(`já existe uma automação chamada "${nome}"`);
     const alvo = b.alvo === undefined ? atual.alvo ?? null : (b.alvo || null);
     if (alvo && !this.janelas.cerebro.sessao(alvo)) throw new Error('agente não encontrado');
+    // a linha da automação só liga a um agente do mesmo palco
+    const palco = atual.palco || this.palcoNovo(b);
+    if (alvo && alvo !== atual.alvo && this.janelas.cerebro.palcoDe(alvo) !== palco) throw new Error('a automação só liga a um agente do mesmo palco');
     let dias = b.dias ?? atual.dias ?? [1, 2, 3, 4, 5];
     dias = [...new Set((Array.isArray(dias) ? dias : String(dias).split(',')).map(Number).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))].sort((x, y) => x - y);
     const hora = String(b.hora ?? atual.hora ?? '09:00');
@@ -98,15 +109,17 @@ class Automacoes {
       manual: !!(b.manual ?? atual.manual ?? false),
       perdida: (b.perdida ?? atual.perdida) === 'pular' ? 'pular' : 'rodar',
       aviso: !!(b.aviso ?? atual.aviso ?? true),
-      x: num(b.x, atual.x ?? 0), y: num(b.y, atual.y ?? 0),
+      nota_no_cerebro: !!(b.nota_no_cerebro ?? atual.nota_no_cerebro ?? false),
+      x: num(b.x, atual.x ?? 0), y: num(b.y, atual.y ?? 0), palco,
     };
   }
 
+  /** Grava a automação. O palco vale só na criação (editar não a leva para outro palco). */
   gravar(a) {
-    this.q(`INSERT INTO automacoes (id, nome, instrucao, alvo, dias, hora, manual, perdida, aviso, x, y, visto, criado) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    this.q(`INSERT INTO automacoes (id, nome, instrucao, alvo, dias, hora, manual, perdida, aviso, x, y, visto, criado, palco, nota_no_cerebro) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET nome = excluded.nome, instrucao = excluded.instrucao, alvo = excluded.alvo, dias = excluded.dias, hora = excluded.hora,
-      manual = excluded.manual, perdida = excluded.perdida, aviso = excluded.aviso, x = excluded.x, y = excluded.y, visto = excluded.visto`)
-      .run(a.id, a.nome, a.instrucao, a.alvo ?? null, a.dias.join(','), a.hora, a.manual ? 1 : 0, a.perdida, a.aviso ? 1 : 0, a.x, a.y, a.visto ?? null, a.criado);
+      manual = excluded.manual, perdida = excluded.perdida, aviso = excluded.aviso, x = excluded.x, y = excluded.y, visto = excluded.visto, nota_no_cerebro = excluded.nota_no_cerebro`)
+      .run(a.id, a.nome, a.instrucao, a.alvo ?? null, a.dias.join(','), a.hora, a.manual ? 1 : 0, a.perdida, a.aviso ? 1 : 0, a.x, a.y, a.visto ?? null, a.criado, a.palco || 1, a.nota_no_cerebro ? 1 : 0);
   }
 
   /** Horário novo: só valem os próximos (o que já passou hoje não roda por causa da mudança). */
@@ -172,6 +185,8 @@ class Automacoes {
     if (this.rodadaAberta(id)) return falhou('a rodada anterior ainda não terminou', pelaPessoa ? 'falhou' : 'pulou');
     const j = this.janelas.ativas.get(a.alvo);
     if (!j) return falhou(`${this.janelas.nomeDe(a.alvo)} não está aberto no palco`);
+    // o agente foi retomado em outro palco depois de ligado: a linha da automação não vale mais
+    if (this.janelas.cerebro.palcoDe(a.alvo) !== (a.palco || 1)) return falhou(`${this.janelas.nomeDe(a.alvo)} está em outro palco agora: ligue a automação a um agente deste palco`);
     const n = this.registrar(a, { marcada: chave, motivo, estado: 'rodando' });
     this.avisarRodada(a);
     this.janelas.enfileirar(j, `auto:${a.id}`, a.instrucao || '(sem orientação)', this.mensagem(a, motivo, marcada));
@@ -212,7 +227,14 @@ class Automacoes {
     else this.registrar(a, { motivo: 'agente', estado: 'ok', resumo, devolutiva: texto.slice(0, 20_000), fim: true });
     this.avisarRodada(a, { devolveu: de });
     this.avisarSistema(a, `${a.nome} terminou`, resumo || 'O resultado está no cartão.');
-    return `Entregue à automação "${a.nome}": a pessoa lê no cartão${a.aviso ? ' e recebe um aviso do Windows' : ''}.`;
+    // diário do palco (uma linha) e, se a pessoa ligou no painel, a devolutiva inteira como nota no cérebro
+    try { this.diario?.registrar({ de: this.janelas.nomeDe(de), para: `automação ${a.nome}`, estado: 'devolvida', resumo }); } catch { /* segue */ }
+    let comNota = false;
+    if (a.nota_no_cerebro && this.diario) {
+      comNota = true;
+      this.diario.notaDeAutomacao(a, texto).catch(e => this.avisar({ tipo: 'aviso', texto: `A devolutiva de ${a.nome} não virou nota no cérebro: ${String(e.message).slice(0, 140)}` }));
+    }
+    return `Entregue à automação "${a.nome}": a pessoa lê no cartão${a.aviso ? ' e recebe um aviso do Windows' : ''}${comNota ? ', e ela também fica guardada como nota no cérebro' : ''}.`;
   }
 
   /** As automações ligadas a um agente, para o equipe dele. */
@@ -273,19 +295,24 @@ class Automacoes {
 
   // ---------------------------------------------------------------- post-its
 
-  postits() { return this.q('SELECT id, texto, x, y FROM postits ORDER BY criado').all().map(r => ({ ...r })); }
+  /** Os post-its de um palco (sem palco: de todos). */
+  postits(palco = null) {
+    const l = palco == null ? this.q('SELECT id, texto, x, y, palco FROM postits ORDER BY criado').all() : this.q('SELECT id, texto, x, y, palco FROM postits WHERE palco = ? ORDER BY criado').all(palco);
+    return l.map(r => ({ ...r }));
+  }
 
   postitSalvar(b, id = null) {
-    const atual = id ? this.q('SELECT id, texto, x, y FROM postits WHERE id = ?').get(id) : null;
+    const atual = id ? this.q('SELECT id, texto, x, y, palco FROM postits WHERE id = ?').get(id) : null;
     if (id && !atual) throw new Error('post-it não encontrado');
     const num = (v, padrao) => (Number.isFinite(Number(v)) ? Math.max(-1e6, Math.min(Number(v), 1e6)) : padrao);
     const p = {
       id: id || `postit-${crypto.randomUUID().slice(0, 8)}`,
       texto: String(b.texto ?? atual?.texto ?? '').slice(0, 2000),
       x: num(b.x, atual?.x ?? 0), y: num(b.y, atual?.y ?? 0),
+      palco: atual?.palco || this.palcoNovo(b), // o palco vale só na criação
     };
-    this.q('INSERT INTO postits (id, texto, x, y, criado) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET texto = excluded.texto, x = excluded.x, y = excluded.y')
-      .run(p.id, p.texto, p.x, p.y, agora());
+    this.q('INSERT INTO postits (id, texto, x, y, criado, palco) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET texto = excluded.texto, x = excluded.x, y = excluded.y')
+      .run(p.id, p.texto, p.x, p.y, agora(), p.palco);
     this.avisar({ tipo: 'postit', acao: 'salvo', postit: p });
     return p;
   }

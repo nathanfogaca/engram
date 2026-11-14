@@ -41,6 +41,38 @@ motor (src/motor/motor.js, Node puro, fora da pasta de instalação)
   - o motor nasce pelo `Start-Process`, sem herdar handles do app (se herdasse, seguraria arquivos
     e portas e travaria a atualização).
 - **Agentes:** cada janela escolhe o agente (CLI) e o modelo. Veja "Contas e agentes" abaixo.
+- **Palcos:** até 3, alternados pelo item Palcos do menu Ferramentas (barra de baixo).
+  - Cada palco tem os seus cartões, linhas, setores, automações e post-its (coluna `palco` no
+    banco; o que existia antes ficou no Palco 1).
+  - Trocar de palco só muda o que aparece na tela: os agentes de todos os palcos seguem rodando e
+    recebendo mensagens.
+  - Uma linha só liga cartões do mesmo palco. As ferramentas do maestro valem para o palco dele, e
+    quem ele cria nasce nesse palco.
+  - O limite de janelas soma os três palcos.
+- **Quadro de tarefas** (botão Quadro, ou a tecla Q, ao lado de Ferramentas): cada mensagem que o maestro
+  manda pelo `enviar` vira uma tarefa, que passa por delegada → em andamento (chegou ao colega) →
+  devolvida (o colega respondeu ao maestro) → entregue (o maestro marca pela ferramenta `tarefas`, ou a
+  pessoa marca na folha).
+  - O quadro é de cada palco e guarda só o começo da devolutiva; a leitura abre o texto inteiro.
+  - O cartão de cada agente mostra a tarefa em que ele está.
+- **Diário no cérebro:** uma linha por delegação e devolutiva na nota do dia
+  (`sessoes/diario-AAAA-MM-DD.md`). Leva só o assunto e um resumo curto, e e-mail, CPF, CNPJ, telefone e
+  token saem mascarados. Fica ligado por padrão (Ajustes > Geral > Palco).
+  - A devolutiva de uma automação pode virar nota própria (`automacoes/<nome>/`), pelo interruptor no
+    painel da automação.
+- **Cenas** (botão Cenas, na barra de baixo): o desenho do time guardado para recriar com um clique.
+  - Guarda agentes (nome, papel, CLI e modelo), ligações e revisões, setores e posições. Automações e
+    post-its só entram se a pessoa marcar.
+  - Nunca guarda conversa, id, pasta, arquivo, token, chave ou MCP.
+  - Recriar põe a cena ao lado do que já está no palco, ou num palco vazio (como foi salva). Se o palco
+    já tem maestro, não abre outro: as linhas da cena vão para o maestro de lá.
+  - Exportar e importar `.json`. O que vem de fora é refeito campo a campo e o resto é descartado.
+- **Medidor de uso** (botão Uso, na barra de baixo): o chip do cartão mostra os tokens de entrada e de saída da conversa. O painel mostra
+  cache lida, cache escrita e um custo estimado (o preço de tabela da API: para quem usa a conta ou
+  assinatura, é só uma referência de tamanho).
+  - Lê o que o Claude Code (`.jsonl`) e o Codex (`token_count` do rollout) gravam no disco.
+  - Gemini CLI e OpenCode ficam sem medidor: não gravam a conversa num arquivo que o Engram lê.
+  - Preços próprios entram no `config.json` (`precos`).
 - **Dados:** `%APPDATA%\Engram` (banco, config.json, arquivos, cérebro local).
 
 ## Primeiro uso
@@ -63,11 +95,24 @@ O botão **Ajustes**, no topo, abre cinco abas: Geral, Aparência, Contas, MCPs 
 ### Geral
 
 - **Onde os agentes trabalham:** a pasta de trabalho de cada janela nova.
-- **Cérebro:** uma pasta neste computador ou um servidor remoto (MCP com `arquivos_listar` e
-  `arquivos_ler`). O token fica numa variável de ambiente. Trocar a fonte vale depois de
-  reiniciar; o botão "Reiniciar agora" não derruba os agentes.
-- **Limites:** janelas abertas, mensagens entre dois agentes a cada 10 minutos (a trava contra loop) e
-  o tamanho máximo de arquivo.
+- **Cérebro:** uma pasta neste computador e um servidor remoto (MCP com `arquivos_listar` e
+  `arquivos_ler`), as duas configurações guardadas juntas. O token fica numa variável de ambiente.
+  - A fonte em uso troca na hora, sem reiniciar: pelo seletor no topo (Local | Servidor, ao lado
+    da sincronização) ou em "Em uso agora", aqui.
+  - O índice de cada fonte fica guardado: a constelação volta na hora, e a sincronização só lê o
+    que mudou.
+  - Se o servidor não responder na troca, o cérebro fica no Local. Os agentes já abertos recebem
+    um aviso na próxima mensagem que o Engram entregar a eles (de um colega, da pessoa pela Conversa
+    ou de uma automação), dizendo onde ler e gravar.
+  - Nesta versão, a fonte vale para os três palcos.
+  - A primeira leitura do servidor (e a de quem atualizou de uma versão antiga, que relê o índice uma
+    vez) leva uns 11 minutos para ~450 notas, pelo limite de chamadas por minuto: a constelação vai crescendo e
+    o topo mostra "lendo X de Y". Se o Engram fechar no meio, a leitura recomeça na próxima abertura.
+- **Limites:** janelas abertas (padrão 24, de 1 a 64; vale também para o `criar_agente` do maestro),
+  mensagens entre dois agentes a cada 10 minutos (a trava contra loop) e o tamanho máximo de arquivo
+  (vale também para a soma dos anexos de um `enviar`).
+- **Palco:** a bolha com o código sendo escrito em cima do cartão, e "Anotar delegações e devolutivas
+  no cérebro" (o diário, ligado por padrão).
 - **Contexto para todos os agentes:** o texto que entra no prompt de toda janela nova (ex.: o mapa dos
   sistemas da empresa).
 - **Atualização:** liga e desliga a instalação sozinha.

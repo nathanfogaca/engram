@@ -2,8 +2,13 @@
 // A fonte da verdade das notas são os arquivos (pasta local ou servidor remoto). Este índice é cópia.
 
 const { Worker } = require('node:worker_threads');
-const { transacao, agora, haMinutos } = require('./banco');
+const { transacao, agora, haMinutos, PALCOS } = require('./banco');
 const { interpretar } = require('./notas');
+
+const COLUNAS_NOTA = 'id, caminho, tipo, titulo, sistema, situacao, meta, corpo, erro, bytes, modificado, sincronizado';
+const VERSAO_INDICE = 2; // 2: a leitura do servidor tira o cabeçalho novo ("..., linhas 1 a N de N]")
+// as duas pontas de uma ligação estão no mesmo palco (ligação antiga com uma ponta retomada em outro palco não vale)
+const MESMO_PALCO = 'COALESCE((SELECT palco FROM sessoes WHERE id = conexoes.a), 1) = COALESCE((SELECT palco FROM sessoes WHERE id = conexoes.b), 1)';
 
 class Cerebro {
   constructor(cfg, db, caminhoBanco, fonte) {
@@ -22,38 +27,64 @@ class Cerebro {
 
   // ---------------------------------------------------------------- sincronização
 
+  /**
+   * Lê da fonte o que mudou. Se a fonte trocar no meio (pasta <-> servidor), a leitura antiga para sem gravar
+   * nada e a próxima chamada já começa outra, da fonte nova.
+   */
   async sincronizar(forcar = false) {
-    if (this.sincronizando) return this.sincronizando;
-    this.sincronizando = this._sincronizar(forcar).finally(() => { this.sincronizando = null; });
-    return this.sincronizando;
+    if (this.sincronizando && this.sincronizando.fonte === this.fonte) return this.sincronizando.p;
+    const fonte = this.fonte;
+    const p = this._sincronizar(forcar, fonte).finally(() => { if (this.sincronizando?.p === p) this.sincronizando = null; });
+    this.sincronizando = { fonte, p };
+    return p;
   }
 
-  async _sincronizar(forcar) {
+  async _sincronizar(forcar, fonte = this.fonte) {
     const inicio = Date.now();
-    const remotos = await this.fonte.listar();
+    const cancelada = () => ({ novas: 0, alteradas: 0, removidas: 0, total: 0, erros: [], cancelada: true, segundos: Math.round((Date.now() - inicio) / 100) / 10 });
+    const remotos = await fonte.listar();
+    if (this.fonte !== fonte) return cancelada();
     const locais = new Map(this.q('SELECT caminho, modificado FROM notas').all().map(r => [r.caminho, r.modificado]));
     let novas = 0, alteradas = 0;
     const erros = [];
-    for (const [rel, assinatura] of [...remotos.entries()].sort()) {
-      if (!forcar && locais.get(rel) === assinatura) continue;
+    // o que precisa ser lido; leitura longa (o servidor lê uma nota por chamada, com limite por minuto) avisa o
+    // progresso de tempos em tempos, para a constelação ir crescendo em vez de ficar vazia até o fim
+    const aLer = [...remotos.entries()].sort().filter(([rel, assinatura]) => forcar || locais.get(rel) !== assinatura);
+    let lidas = 0, ultimoAviso = Date.now();
+    for (const [rel, assinatura] of aLer) {
       let texto;
-      try { texto = await this.fonte.ler(rel); } catch (e) { erros.push(`${rel}: ${e.message}`); continue; }
+      try { texto = await fonte.ler(rel); } catch (e) {
+        erros.push(`${rel}: ${e.message}`);
+        // releitura inteira com erro nesta nota: ela perde a assinatura e a próxima sincronização relê só ela
+        if (forcar && this.fonte === fonte) this.q('UPDATE notas SET modificado = NULL WHERE caminho = ?').run(rel);
+        continue;
+      }
+      if (this.fonte !== fonte) return cancelada();
       const problema = this.gravarNota(interpretar(rel, texto), assinatura);
       if (problema) erros.push(problema);
       else if (locais.has(rel)) alteradas++;
       else novas++;
+      lidas++;
+      if (aLer.length >= 10 && Date.now() - ultimoAviso > 1500) {
+        ultimoAviso = Date.now();
+        try { this.aoProgresso?.({ lidas, total: aLer.length }); } catch { /* segue */ }
+      }
     }
+    if (this.fonte !== fonte) return cancelada();
     const removidas = [...locais.keys()].filter(rel => !remotos.has(rel));
     transacao(this.db, () => {
       for (const rel of removidas) this.apagarNota(rel);
       this.q("INSERT OR REPLACE INTO estado VALUES ('ultima_sincronizacao', ?)").run(agora());
     });
-    return { novas, alteradas, removidas: removidas.length, total: remotos.size, erros, segundos: Math.round((Date.now() - inicio) / 100) / 10 };
+    return { novas, alteradas, removidas: removidas.length, total: remotos.size, erros, forcada: !!forcar, segundos: Math.round((Date.now() - inicio) / 100) / 10 };
   }
 
   async sincronizarArquivo(rel) {
+    const fonte = this.fonte;
     try {
-      return this.gravarNota(interpretar(rel, await this.fonte.ler(rel)), null);
+      const texto = await fonte.ler(rel);
+      if (this.fonte !== fonte) return null; // a fonte trocou enquanto lia: a nota era da outra
+      return this.gravarNota(interpretar(rel, texto), null);
     } catch (e) {
       return `${rel}: ${e.message}`;
     }
@@ -81,6 +112,48 @@ class Cerebro {
     this.q('DELETE FROM notas WHERE id = ?').run(linha.id);
     this.q('DELETE FROM ligacoes WHERE origem = ?').run(linha.id);
     this.q('DELETE FROM notas_fts WHERE id = ?').run(linha.id);
+  }
+
+  // ---------------------------------------------------------------- o índice de cada fonte
+  // Trocar a fonte (pasta neste computador <-> servidor) não joga o índice fora: o da fonte que sai fica
+  // guardado no banco e o da que entra volta na hora, então a constelação já aparece e a sincronização só lê o
+  // que mudou desde a última vez. A chave é a da fonte (o tipo e onde ela fica).
+
+  fonteDoIndice() { return this.q("SELECT valor FROM estado WHERE chave = 'indice_fonte'").get()?.valor || null; }
+
+  /**
+   * Índice de servidor lido por uma versão que não tirava o cabeçalho que o servidor põe na leitura ("[caminho, parte
+   * 1 de 1, linhas ...]"): o corpo das notas começa por ele e o frontmatter não é lido. Esse índice é relido uma vez,
+   * inteiro (em segundo plano, com o progresso na tela). A pasta local nunca teve o problema.
+   */
+  indiceVelho(chave) { return String(chave).startsWith('remoto:') && this.q('SELECT valor FROM estado WHERE chave = ?').get(`indice_versao:${chave}`)?.valor !== String(VERSAO_INDICE); }
+  marcarIndiceNovo(chave) { this.q('INSERT OR REPLACE INTO estado VALUES (?, ?)').run(`indice_versao:${chave}`, String(VERSAO_INDICE)); }
+
+  /** No início: o índice que está no banco é de outra fonte? Troca. Banco de versão antiga: o índice é da fonte em uso. */
+  alinharIndice(chave) {
+    const atual = this.fonteDoIndice();
+    if (!atual) this.q("INSERT OR REPLACE INTO estado VALUES ('indice_fonte', ?)").run(chave);
+    else if (atual !== chave) this.trocarIndice(atual, chave);
+  }
+
+  trocarIndice(de, para) {
+    if (de === para) return;
+    const estado = k => this.q('SELECT valor FROM estado WHERE chave = ?').get(k)?.valor ?? null;
+    transacao(this.db, () => {
+      if (de) {
+        this.q('DELETE FROM notas_guardadas WHERE fonte = ?').run(de);
+        this.q('DELETE FROM ligacoes_guardadas WHERE fonte = ?').run(de);
+        this.q(`INSERT INTO notas_guardadas (fonte, ${COLUNAS_NOTA}) SELECT ?, ${COLUNAS_NOTA} FROM notas`).run(de);
+        this.q('INSERT INTO ligacoes_guardadas (fonte, origem, destino, tipo) SELECT ?, origem, destino, tipo FROM ligacoes').run(de);
+        this.q('INSERT OR REPLACE INTO estado VALUES (?, ?)').run(`ultima_sincronizacao:${de}`, estado('ultima_sincronizacao'));
+      }
+      this.db.exec('DELETE FROM notas; DELETE FROM ligacoes; DELETE FROM notas_fts;');
+      this.q(`INSERT INTO notas (${COLUNAS_NOTA}) SELECT ${COLUNAS_NOTA} FROM notas_guardadas WHERE fonte = ?`).run(para);
+      this.q('INSERT INTO ligacoes (origem, destino, tipo) SELECT origem, destino, tipo FROM ligacoes_guardadas WHERE fonte = ?').run(para);
+      this.db.exec('INSERT INTO notas_fts (id, titulo, corpo) SELECT id, titulo, corpo FROM notas');
+      this.q('INSERT OR REPLACE INTO estado VALUES (?, ?)').run('ultima_sincronizacao', estado(`ultima_sincronizacao:${para}`));
+      this.q("INSERT OR REPLACE INTO estado VALUES ('indice_fonte', ?)").run(para);
+    });
   }
 
   // ---------------------------------------------------------------- leitura
@@ -170,12 +243,16 @@ class Cerebro {
 
   // ---------------------------------------------------------------- sessões
 
-  sessaoCriar(id, nome, provedor, modelo, papel, pasta) {
-    this.q(`INSERT INTO sessoes (id, nome, provedor, modelo, papel, pasta, criada, encerrada, estado, manter)
-            VALUES (?,?,?,?,?,?,?,NULL,'iniciando',1)
-            ON CONFLICT(id) DO UPDATE SET encerrada = NULL, estado = 'iniciando', manter = 1, modelo = excluded.modelo, nome = excluded.nome, provedor = excluded.provedor, pasta = excluded.pasta`)
-      .run(id, nome, provedor, modelo, papel, pasta, agora());
+  sessaoCriar(id, nome, provedor, modelo, papel, pasta, palco = 1) {
+    this.q(`INSERT INTO sessoes (id, nome, provedor, modelo, papel, pasta, criada, encerrada, estado, manter, palco)
+            VALUES (?,?,?,?,?,?,?,NULL,'iniciando',1,?)
+            ON CONFLICT(id) DO UPDATE SET encerrada = NULL, estado = 'iniciando', manter = 1, modelo = excluded.modelo, nome = excluded.nome, provedor = excluded.provedor, pasta = excluded.pasta, palco = excluded.palco`)
+      .run(id, nome, provedor, modelo, papel, pasta, agora(), palco);
   }
+  /** O cérebro descrito no prompt com que a conversa está rodando (a chave da fonte). */
+  sessaoCerebroPrompt(id, chave) { this.q('UPDATE sessoes SET cerebro_prompt = ? WHERE id = ?').run(chave, id); }
+  /** Janelas de versões antigas (sem a coluna preenchida) nasceram com a fonte que está em uso agora. */
+  sessoesSemCerebroPrompt(chave) { this.q('UPDATE sessoes SET cerebro_prompt = ? WHERE cerebro_prompt IS NULL').run(chave); }
   sessaoMcps(id, lista) { this.q('UPDATE sessoes SET mcps = ? WHERE id = ?').run(lista ? JSON.stringify(lista) : null, id); }
   sessaoExterno(id, externo) { this.q('UPDATE sessoes SET externo = ? WHERE id = ? AND externo IS NOT ?').run(externo, id, externo); }
   sessaoEstado(id, estado) { this.q('UPDATE sessoes SET estado = ? WHERE id = ?').run(estado, id); }
@@ -197,12 +274,21 @@ class Cerebro {
   eventos(sessao, limite = 200) {
     return this.q('SELECT * FROM (SELECT * FROM eventos WHERE sessao = ? ORDER BY n DESC LIMIT ?) ORDER BY n').all(sessao, limite).map(r => ({ ...r }));
   }
+  /** O último evento de um tipo (ex.: PreToolUse = a última ferramenta que o agente usou). */
+  ultimoEvento(sessao, evento) {
+    const r = this.q('SELECT quando, ferramenta, resumo FROM eventos WHERE sessao = ? AND evento = ? ORDER BY n DESC LIMIT 1').get(sessao, evento);
+    return r ? { ...r } : null;
+  }
 
   // ---------------------------------------------------------------- palco
 
-  conectar(a, b) { [a, b] = [a, b].sort(); return this.q('INSERT OR IGNORE INTO conexoes (a, b, criada) VALUES (?,?,?)').run(a, b, agora()).changes > 0; }
+  conectar(a, b) {
+    if (this.palcoDe(a) !== this.palcoDe(b)) return false; // uma linha só liga cartões do mesmo palco
+    [a, b] = [a, b].sort();
+    return this.q('INSERT OR IGNORE INTO conexoes (a, b, criada) VALUES (?,?,?)').run(a, b, agora()).changes > 0;
+  }
   desconectar(a, b) { [a, b] = [a, b].sort(); return this.q('DELETE FROM conexoes WHERE a = ? AND b = ?').run(a, b).changes > 0; }
-  conexoes() { return this.q('SELECT a, b, revisa FROM conexoes').all().map(r => ({ ...r })); }
+  conexoes() { return this.q(`SELECT a, b, revisa FROM conexoes WHERE ${MESMO_PALCO}`).all().map(r => ({ ...r })); }
   /** Revisão na ligação a-b: "revisor" (uma das pontas) revisa as entregas da outra; null tira. Cada agente tem um revisor só. */
   revisao(a, b, revisor) {
     [a, b] = [a, b].sort();
@@ -216,11 +302,11 @@ class Cerebro {
   }
   /** Quem revisa as entregas deste agente (ou null). */
   revisorDe(id) {
-    return this.q('SELECT revisa FROM conexoes WHERE (a = ? OR b = ?) AND revisa IS NOT NULL AND revisa != ?').get(id, id, id)?.revisa || null;
+    return this.q(`SELECT revisa FROM conexoes WHERE (a = ? OR b = ?) AND revisa IS NOT NULL AND revisa != ? AND ${MESMO_PALCO}`).get(id, id, id)?.revisa || null;
   }
   /** Os agentes cujas entregas este revisa. */
   revisados(id) {
-    return this.q('SELECT a, b FROM conexoes WHERE revisa = ?').all(id).map(r => (r.a === id ? r.b : r.a));
+    return this.q(`SELECT a, b FROM conexoes WHERE revisa = ? AND ${MESMO_PALCO}`).all(id).map(r => (r.a === id ? r.b : r.a));
   }
   /** A última tarefa que um colega (fora os excluídos) mandou para este agente. */
   ultimaTarefa(para, excluir = []) {
@@ -228,27 +314,63 @@ class Cerebro {
     return r ? { ...r } : null;
   }
   conectados(id) {
-    return new Set(this.q('SELECT a, b FROM conexoes WHERE a = ? OR b = ?').all(id, id).map(r => (r.a === id ? r.b : r.a)));
+    return new Set(this.q(`SELECT a, b FROM conexoes WHERE (a = ? OR b = ?) AND ${MESMO_PALCO}`).all(id, id).map(r => (r.a === id ? r.b : r.a)));
   }
   posicaoSalvar(id, x, y, w, h) { this.q('INSERT OR REPLACE INTO posicoes VALUES (?,?,?,?,?)').run(id, x, y, w, h); }
   posicao(id) { const r = this.q('SELECT x, y, w, h FROM posicoes WHERE id = ?').get(id); return r ? { ...r } : null; }
+  /**
+   * Apaga a posição de quem saiu de vez do palco: janela que nem existe mais e janela encerrada que já saiu do
+   * histórico (a gaveta mostra as últimas `historico`). Quem ainda pode ser retomado guarda o lugar.
+   */
+  posicoesLimpar(historico = 50) {
+    return this.q(`DELETE FROM posicoes WHERE id NOT IN (SELECT id FROM sessoes)
+      OR id IN (SELECT id FROM sessoes WHERE encerrada IS NOT NULL AND manter = 0
+                AND id NOT IN (SELECT id FROM sessoes ORDER BY criada DESC LIMIT ?))`).run(historico).changes;
+  }
   // setores do palco: áreas com nome e cor; quem tem o centro do cartão dentro faz parte
-  setores() { return this.q('SELECT id, nome, cor, instrucao, x, y, w, h FROM setores ORDER BY criado').all().map(r => ({ ...r })); }
-  setor(id) { const r = this.q('SELECT id, nome, cor, instrucao, x, y, w, h FROM setores WHERE id = ?').get(id); return r ? { ...r } : null; }
+  /** Os setores de um palco (sem palco: de todos). */
+  setores(palco = null) {
+    const sql = 'SELECT id, nome, cor, instrucao, x, y, w, h, palco FROM setores';
+    return (palco == null ? this.q(`${sql} ORDER BY criado`).all() : this.q(`${sql} WHERE palco = ? ORDER BY criado`).all(palco)).map(r => ({ ...r }));
+  }
+  setor(id) { const r = this.q('SELECT id, nome, cor, instrucao, x, y, w, h, palco FROM setores WHERE id = ?').get(id); return r ? { ...r } : null; }
+  /** Grava o setor. O palco vale só na criação: mudar um setor não o leva para outro palco. */
   setorSalvar(s) {
-    this.q('INSERT INTO setores (id, nome, cor, instrucao, x, y, w, h, criado) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome = excluded.nome, cor = excluded.cor, instrucao = excluded.instrucao, x = excluded.x, y = excluded.y, w = excluded.w, h = excluded.h')
-      .run(s.id, s.nome, s.cor, s.instrucao || '', s.x, s.y, s.w, s.h, agora());
+    this.q('INSERT INTO setores (id, nome, cor, instrucao, x, y, w, h, criado, palco) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome = excluded.nome, cor = excluded.cor, instrucao = excluded.instrucao, x = excluded.x, y = excluded.y, w = excluded.w, h = excluded.h')
+      .run(s.id, s.nome, s.cor, s.instrucao || '', s.x, s.y, s.w, s.h, agora(), s.palco || 1);
   }
   setorApagar(id) { return this.q('DELETE FROM setores WHERE id = ?').run(id).changes > 0; }
   /** O setor de uma janela: o menor que contém o centro do cartão dela (ou null). */
-  setorDe(id, setores = this.setores()) {
+  setorDe(id, setores = null) {
     const p = this.posicao(id);
     if (!p) return null;
+    const palco = this.palcoDe(id);
     const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
-    return setores.filter(s => cx > s.x && cx < s.x + s.w && cy > s.y && cy < s.y + s.h).sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
+    return (setores || this.setores(palco)).filter(s => (s.palco || 1) === palco && cx > s.x && cx < s.x + s.w && cy > s.y && cy < s.y + s.h)
+      .sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
   }
+
+  // ---------------------------------------------------------------- palcos
+  // Até PALCOS palcos, cada um com os seus cartões, linhas, setores, automações e post-its. Trocar de palco na
+  // tela não encerra ninguém: os agentes de todos os palcos seguem rodando e recebendo mensagens.
+
+  palcoDe(id) { return this.q('SELECT palco FROM sessoes WHERE id = ?').get(id)?.palco || 1; }
+  palcos() { return this.q('SELECT n, nome FROM palcos WHERE n BETWEEN 1 AND ? ORDER BY n').all(PALCOS).map(r => ({ ...r })); }
+  palcoNome(n) { return this.q('SELECT nome FROM palcos WHERE n = ?').get(n)?.nome || `Palco ${n}`; }
+  palcoRenomear(n, nome) { return this.q('UPDATE palcos SET nome = ? WHERE n = ?').run(nome, n).changes > 0; }
+  /** O palco que a tela está mostrando (vale para o que é criado pela tela sem dizer o palco). */
+  palcoAtual() {
+    const n = Number(this.q("SELECT valor FROM estado WHERE chave = 'palco_atual'").get()?.valor);
+    return Number.isInteger(n) && n >= 1 && n <= PALCOS ? n : 1;
+  }
+  palcoAtualDefinir(n) { this.q("INSERT OR REPLACE INTO estado VALUES ('palco_atual', ?)").run(String(n)); }
   mensagemRegistrar(de, para, texto) { return Number(this.q('INSERT INTO mensagens (de, para, quando, texto) VALUES (?,?,?,?)').run(de, para, agora(), texto).lastInsertRowid); }
   mensagemEntregue(n) { this.q('UPDATE mensagens SET entregue = ? WHERE n = ?').run(agora(), n); }
+  /** A última mensagem que chegou a este agente (a tarefa em que ele está, ou a última que fez). */
+  ultimaRecebida(para) {
+    const r = this.q('SELECT de, texto, quando, entregue FROM mensagens WHERE para = ? AND entregue IS NOT NULL ORDER BY n DESC LIMIT 1').get(para);
+    return r ? { ...r } : null;
+  }
   mensagensNoPar(a, b, minutos = 10) {
     return this.q('SELECT COUNT(*) AS n FROM mensagens WHERE quando >= ? AND ((de = ? AND para = ?) OR (de = ? AND para = ?))').get(haMinutos(minutos), a, b, b, a).n;
   }

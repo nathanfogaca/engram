@@ -33,6 +33,15 @@ class FontePasta {
     this.tipo = 'pasta';
   }
 
+  /** Identifica a fonte (o índice de cada uma fica guardado à parte quando a pessoa troca). */
+  get chave() { return `pasta:${this.pasta.toLowerCase()}`; }
+
+  /** Conferida antes de virar a fonte do cérebro: a pasta tem de existir (ou dar para criar) e aceitar arquivos. */
+  async testar() {
+    this.preparar();
+    await fsp.access(this.pasta, fs.constants.R_OK | fs.constants.W_OK);
+  }
+
   preparar() {
     fs.mkdirSync(this.pasta, { recursive: true });
     const leiame = path.join(this.pasta, 'LEIAME.md');
@@ -85,12 +94,19 @@ class FontePasta {
       });
     } catch { /* sem vigia: a sincronização periódica cobre */ }
   }
+
+  /** Para de vigiar a pasta (a pessoa trocou o cérebro para outra fonte). */
+  parar() {
+    try { this.vigia?.close(); } catch { /* já fechado */ }
+    this.vigia = null;
+  }
 }
 
 // ------------------------------------------------------------------ servidor remoto (MCP com arquivos_*)
 
 const LINHA_ARQUIVO = /^(.+?)\s{2}\(([\d.,]+) bytes, (\d{2}\/\d{2}\/\d{4} \d{2}:\d{2})\)$/;
-const CABECALHO_LEITURA = /^\[(.+), parte (\d+) de (\d+)\]\r?\n\r?\n?/;
+// o servidor responde "[caminho, parte 1 de 3]" (antes) ou "[caminho, parte 1 de 3, linhas 1 a 900 de 2400]" (hoje)
+const CABECALHO_LEITURA = /^\[(.+?), parte (\d+) de (\d+)(?:, [^\]\r\n]*)?\]\r?\n\r?\n?/;
 
 class FonteRemota {
   constructor({ url, token_env = '', ca = '', pasta_remota = 'cerebro', servidor = 'cerebro' }) {
@@ -106,6 +122,17 @@ class FonteRemota {
   }
 
   preparar() {}
+
+  get chave() { return `remoto:${this.url.href}|${this.raiz}`; }
+
+  /** Conferida antes de virar a fonte do cérebro: o servidor tem de responder (até `ms`). */
+  async testar(ms = 15_000) {
+    let prazo;
+    const tempo = new Promise((_, rej) => { prazo = setTimeout(() => rej(new Error(`sem resposta em ${Math.round(ms / 1000)} s`)), ms); });
+    try { await Promise.race([this.chamar('arquivos_listar', { pasta: this.raiz }), tempo]); } finally { clearTimeout(prazo); }
+  }
+
+  parar() {}
 
   descricao() {
     return `As notas ficam em ${this.raiz}/ no servidor; leia e grave pelas ferramentas ${this.prefixo}arquivos_*.`;
@@ -127,11 +154,12 @@ class FonteRemota {
     }
   }
 
-  async chamar(ferramenta, argumentos) {
+  /** Uma chamada JSON-RPC ao servidor (tools/call, tools/list). Devolve o result. */
+  async rpc(metodo, params) {
     const token = process.env[this.tokenEnv];
     if (!token) throw new Error(`a variável de ambiente ${this.tokenEnv} não está definida`);
     await this.esperarVez();
-    const corpo = JSON.stringify({ jsonrpc: '2.0', id: ++this.n, method: 'tools/call', params: { name: ferramenta, arguments: argumentos } });
+    const corpo = JSON.stringify({ jsonrpc: '2.0', id: ++this.n, method: metodo, params });
     const mod = this.url.protocol === 'https:' ? https : http;
     const conexao = await opcoesDeConexao(this.url, this.ca); // certificado conferido antes de o token sair
     const resposta = await new Promise((resolve, reject) => {
@@ -155,9 +183,37 @@ class FonteRemota {
       json = JSON.parse(linha.slice(5));
     } else json = JSON.parse(resposta.dados);
     if (json.error) throw new Error(`erro do servidor: ${json.error.message}`);
-    const texto = (json.result?.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
-    if (json.result?.isError) throw new Error(texto.slice(0, 300) || 'a ferramenta devolveu erro');
+    return json.result || {};
+  }
+
+  async chamar(ferramenta, argumentos) {
+    const r = await this.rpc('tools/call', { name: ferramenta, arguments: argumentos });
+    const texto = (r.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    if (r.isError) throw new Error(texto.slice(0, 300) || 'a ferramenta devolveu erro');
     return texto;
+  }
+
+  /** O esquema de entrada de uma ferramenta do servidor (null se ele não tem essa ferramenta). Guardado depois da 1ª vez. */
+  async esquema(nome) {
+    this.esquemas ||= (await this.rpc('tools/list', {})).tools || [];
+    return this.esquemas.find(t => t.name === nome)?.inputSchema || null;
+  }
+
+  /**
+   * O arquivo existe no servidor? true ou false, pela listagem de cada pasta do caminho. Lança se o servidor não
+   * respondeu: aí quem ia gravar não grava por cima (um erro de leitura não pode virar "arquivo novo").
+   */
+  async existe(rel) {
+    const partes = String(rel).split('/').filter(Boolean);
+    let pasta = this.raiz;
+    for (let i = 0; i < partes.length; i++) {
+      const texto = await this.chamar('arquivos_listar', { pasta });
+      const nomes = new Set(texto.split(/\r?\n/).slice(1).map(l => l.trimEnd()).filter(Boolean).map(l => (l.endsWith('/') ? l : LINHA_ARQUIVO.exec(l)?.[1] ?? l)));
+      const ultimo = i === partes.length - 1;
+      if (!nomes.has(ultimo ? partes[i] : `${partes[i]}/`)) return false;
+      pasta = `${pasta}/${partes[i]}`;
+    }
+    return true;
   }
 
   async listar() {
@@ -183,7 +239,7 @@ class FonteRemota {
     while (parte <= total) {
       let texto = await this.chamar('arquivos_ler', { caminho: `${this.raiz}/${rel}`, parte });
       const m = CABECALHO_LEITURA.exec(texto);
-      if (m) { total = Number(m[3]); texto = texto.slice(m[0].length); }
+      if (m) { total = Math.min(Number(m[3]), 200); texto = texto.slice(m[0].length); } // teto contra um número absurdo
       partes.push(texto);
       parte++;
     }

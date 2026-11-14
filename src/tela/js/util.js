@@ -94,7 +94,7 @@ export const app = {
   modelos: [],
   provedores: [], // [{ id, nome, instalado, conectado, modelos }]
   papeis: [],
-  maxJanelas: 8,
+  maxJanelas: 24,
   vista: "palco",
 };
 // o nome do modelo na lista do agente dele (o "" do Codex é "Padrão do Codex", não o do Claude)

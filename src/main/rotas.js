@@ -1,12 +1,13 @@
 // O que a tela pede ao app, por IPC (sem porta de rede): os mesmos caminhos da versão web.
 
-const { posicaoValida } = require('./janelas');
+const { posicaoValida, palcoValido } = require('./janelas');
+const { PALCOS } = require('./banco');
 
 class ErroRota extends Error {
   constructor(status, mensagem) { super(mensagem); this.status = status; }
 }
 
-function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, abrirTrabalho }) {
+function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, abrirTrabalho }) {
   const importador = require('./importar');
   const rotas = [];
   const rota = (metodo, padrao, fn) => {
@@ -32,15 +33,46 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
     // primeiro uso: ninguém passou pelo guia, não veio do Engram antigo e nunca abriu uma janela
     primeiro_uso: !cfg.primeiro_uso_feito && !cfg.importado_engram_antigo && cerebro.sessoes(1).length === 0,
   }));
-  rota('GET', '/api/palco', () => {
-    const abertas = new Set(janelas.ativas.keys());
+  // um palco (sem ?palco=, o que a tela está mostrando): cartões abertos, linhas, setores, automações e post-its
+  rota('GET', '/api/palco', (p, b, q) => {
+    const palco = palcoValido(q.get('palco')) || cerebro.palcoAtual();
+    const abertas = new Set(janelas.abertasNoPalco(palco));
     return {
+      palco,
       janelas: [...abertas].map(id => janelas.info(id)),
       conexoes: cerebro.conexoes().filter(c => abertas.has(c.a) && abertas.has(c.b)),
-      setores: cerebro.setores(),
-      automacoes: automacoes.lista(),
-      postits: automacoes.postits(),
+      setores: cerebro.setores(palco),
+      automacoes: automacoes.lista(palco),
+      postits: automacoes.postits(palco),
     };
+  });
+  // ---------------------------------------------------------------- palcos (a pessoa alterna na barra de baixo)
+  // Trocar de palco na tela não encerra ninguém: os agentes de todos os palcos seguem rodando no motor.
+  rota('GET', '/api/palcos', () => {
+    const porPalco = new Map();
+    for (const [id, j] of janelas.ativas) {
+      const s = cerebro.sessao(id);
+      if (!s) continue;
+      const n = s.palco || 1;
+      if (!porPalco.has(n)) porPalco.set(n, []);
+      porPalco.get(n).push({ id, nome: s.nome, estado: j.estado });
+    }
+    return { atual: cerebro.palcoAtual(), max: PALCOS, lista: cerebro.palcos().map(p => ({ ...p, agentes: porPalco.get(p.n) || [] })) };
+  });
+  rota('POST', '/api/palcos/atual', (_, b) => {
+    const n = palcoValido(b.n);
+    exigir(n, 400, `palco inválido: use de 1 a ${PALCOS}`);
+    cerebro.palcoAtualDefinir(n);
+    return { atual: n };
+  });
+  rota('PUT', '/api/palcos/:n', (p, b) => {
+    const n = palcoValido(p.n);
+    exigir(n, 404, 'palco não encontrado');
+    const nome = String(b.nome ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24);
+    exigir(nome, 400, 'o palco precisa de um nome');
+    cerebro.palcoRenomear(n, nome);
+    janelas.avisar({ tipo: 'palcos', acao: 'nome', n, nome });
+    return { n, nome };
   });
   // automações do palco (cartão com orientação e horário, ligado a um agente) e post-its
   const comErro = fn => (...a) => { try { return fn(...a); } catch (e) { throw e instanceof ErroRota ? e : new ErroRota(400, e.message); } };
@@ -65,9 +97,9 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
       w: num(b.w, atual.w ?? 900, 200, 20000), h: num(b.h, atual.h ?? 600, 140, 20000),
     };
   };
-  rota('GET', '/api/setores', () => cerebro.setores());
+  rota('GET', '/api/setores', (p, b, q) => cerebro.setores(palcoValido(q.get('palco'))));
   rota('POST', '/api/setores', (_, b) => {
-    const s = { id: `setor-${require('node:crypto').randomUUID().slice(0, 8)}`, ...setorValido(b) };
+    const s = { id: `setor-${require('node:crypto').randomUUID().slice(0, 8)}`, ...setorValido(b), palco: palcoValido(b.palco) || cerebro.palcoAtual() };
     cerebro.setorSalvar(s);
     janelas.avisar({ tipo: 'setor', acao: 'salvo', setor: s });
     return s;
@@ -75,7 +107,7 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
   rota('PUT', '/api/setores/:id', (p, b) => {
     const atual = cerebro.setor(p.id);
     exigir(atual, 404, 'setor não encontrado');
-    const s = { id: p.id, ...setorValido(b, atual) };
+    const s = { id: p.id, ...setorValido(b, atual), palco: atual.palco || 1 };
     cerebro.setorSalvar(s);
     janelas.avisar({ tipo: 'setor', acao: 'salvo', setor: s });
     return s;
@@ -86,6 +118,7 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
   });
   rota('POST', '/api/conexoes', (_, b) => {
     exigir(b.a && b.b && b.a !== b.b && janelas.ativas.has(b.a) && janelas.ativas.has(b.b), 400, 'as duas pontas têm de ser janelas abertas e diferentes');
+    exigir(cerebro.palcoDe(b.a) === cerebro.palcoDe(b.b), 400, 'uma linha só liga cartões do mesmo palco');
     if (cerebro.conectar(b.a, b.b)) janelas.avisar({ tipo: 'conexao', acao: 'criada', a: b.a, b: b.b });
     return { ok: true };
   });
@@ -119,6 +152,7 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
       return await janelas.abrir({
         nome: b.nome, modelo: b.modelo || '', papel: b.papel || 'livre', provedor: anterior?.provedor || b.provedor || 'claude',
         retomar: b.retomar || null, posicao: b.posicao || null, mcps: Array.isArray(b.mcps) ? b.mcps : undefined,
+        palco: palcoValido(b.palco), // sem palco: o que a tela está mostrando (retomada pelo app: o palco de antes)
       });
     } catch (e) { throw new ErroRota(400, e.message); }
   });
@@ -196,7 +230,8 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
   });
 
   // ---------------------------------------------------------------- MCPs
-  const erro400 = fn => async (...a) => { try { return await fn(...a); } catch (e) { throw e instanceof ErroRota ? e : new ErroRota(400, e.message); } };
+  // erro com status próprio (ex.: 409 da cena de fora sem confirmação) mantém o status; o resto vira 400
+  const erro400 = fn => async (...a) => { try { return await fn(...a); } catch (e) { throw e instanceof ErroRota ? e : new ErroRota(Number.isInteger(e.status) ? e.status : 400, e.message); } };
   const mudouMcps = () => { janelas.escreverGanchos(); janelas.avisar({ tipo: 'mcps' }); return mcps.listar(); };
   rota('GET', '/api/mcps', () => mcps.listar());
   rota('GET', '/api/mcps/encontrados', erro400(() => mcps.encontrados()));
@@ -226,18 +261,17 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
   rota('POST', '/api/skills/:nome/abrir-pasta', erro400(p => { require('electron').shell.openPath(skills.caminho(p.nome)); return { ok: true }; }));
 
   // ---------------------------------------------------------------- geral, tema e primeiro uso
-  const CAMPOS_GERAIS = ['pasta_trabalho', 'max_janelas', 'max_mensagens_par_10min', 'max_arquivo_mb', 'contexto', 'atualizar_sozinho', 'padrao_agente', 'padrao_modelo', 'pensamento_no_palco'];
-  // cérebro salvo que só vale depois de reiniciar (a tela mostra o salvo, não o que está em uso)
-  let cerebroPendente = null;
-  const chaveCerebro = x => (x.fonte === 'remoto'
-    ? JSON.stringify(['remoto', x.url || '', x.token_env || '', x.ca || '', x.pasta_remota || 'cerebro', x.servidor || 'cerebro'])
-    : JSON.stringify(['pasta', x.pasta || caminhos.cerebro]));
+  const CAMPOS_GERAIS = ['pasta_trabalho', 'max_janelas', 'max_mensagens_par_10min', 'max_arquivo_mb', 'contexto', 'atualizar_sozinho', 'padrao_agente', 'padrao_modelo', 'pensamento_no_palco', 'diario_no_cerebro'];
+  // o cérebro: as duas configurações (pasta e servidor) ficam guardadas, e a fonte em uso troca na hora
+  rota('GET', '/api/cerebro/fonte', () => trocaCerebro.estado());
+  rota('POST', '/api/cerebro/fonte', erro400(async (_, b) => trocaCerebro.trocar(String(b.fonte || ''))));
   rota('GET', '/api/config', () => ({
     ...Object.fromEntries(CAMPOS_GERAIS.map(k => [k, cfg[k] ?? null])),
     atualizar_sozinho: cfg.atualizar_sozinho !== false,
     pensamento_no_palco: cfg.pensamento_no_palco !== false,
-    cerebro: { ...(cerebroPendente || cfg.cerebro) }, cerebro_pendente: !!cerebroPendente,
-    cerebro_fonte_ativa: cerebro.fonte.tipo, dados: caminhos.dados, versao,
+    diario_no_cerebro: cfg.diario_no_cerebro !== false, // ligado por padrão
+    cerebro: { ...cfg.cerebro, fonte: cerebro.fonte.tipo }, cerebro_pendente: false,
+    cerebro_fonte_ativa: cerebro.fonte.tipo, cerebro_servidor: trocaCerebro.estado().servidor, dados: caminhos.dados, versao,
   }));
   rota('POST', '/api/config', erro400(async (_, b) => {
     const fs = require('node:fs');
@@ -253,34 +287,23 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
       exigir(p && fs.existsSync(p) && fs.statSync(p).isDirectory(), 400, 'a pasta de trabalho não existe');
       parcial.pasta_trabalho = p;
     }
-    numero('max_janelas', 1, 24);
+    numero('max_janelas', 1, 64);
     numero('max_mensagens_par_10min', 5, 300);
     numero('max_arquivo_mb', 1, 2000);
     if (b.contexto !== undefined) parcial.contexto = String(b.contexto).slice(0, 20_000);
     if (b.atualizar_sozinho !== undefined) parcial.atualizar_sozinho = !!b.atualizar_sozinho;
     if (b.pensamento_no_palco !== undefined) parcial.pensamento_no_palco = !!b.pensamento_no_palco;
+    if (b.diario_no_cerebro !== undefined) parcial.diario_no_cerebro = !!b.diario_no_cerebro;
     if (b.padrao_agente !== undefined) { exigir(!b.padrao_agente || provedores.adaptador(b.padrao_agente), 400, 'agente desconhecido'); parcial.padrao_agente = b.padrao_agente || null; }
     if (b.padrao_modelo !== undefined) parcial.padrao_modelo = String(b.padrao_modelo || '');
-    let reiniciar = false;
-    if (b.cerebro) {
-      const c = b.cerebro;
-      const novo = c.fonte === 'remoto'
-        ? { fonte: 'remoto', url: String(c.url || '').trim(), token_env: String(c.token_env || '').trim(), ca: String(c.ca || '').trim(), pasta_remota: String(c.pasta_remota || 'cerebro').trim(), servidor: String(c.servidor || 'cerebro').trim(), sincronizar_min: cfg.cerebro.sincronizar_min }
-        : { fonte: 'pasta', pasta: String(c.pasta || '').trim(), sincronizar_min: cfg.cerebro.sincronizar_min };
-      if (novo.fonte === 'remoto') {
-        exigir(/^https?:\/\//.test(novo.url), 400, 'o endereço do cérebro remoto tem de começar com http:// ou https://');
-        exigir(!novo.ca || fs.existsSync(novo.ca), 400, 'o arquivo do certificado (CA) não existe');
-        const m = mcps.porUrl(novo.url); // o nome com que os agentes enxergam o servidor é o do cadastro em MCPs
-        if (m) novo.servidor = m.id;
-      }
-      if (novo.fonte === 'pasta' && novo.pasta) { fs.mkdirSync(novo.pasta, { recursive: true }); }
-      reiniciar = chaveCerebro(novo) !== chaveCerebro(cfg.cerebro);
-      cerebroPendente = reiniciar ? novo : null;
-      parcial.cerebro = novo;
-    }
+    // o cérebro é conferido antes de gravar qualquer coisa: um erro de preenchimento nele não deixa metade gravada
+    const cerebroValidado = b.cerebro ? trocaCerebro.validarAjuste(b.cerebro) : null;
     salvarConfig(parcial);
-    for (const [k, v] of Object.entries(parcial)) if (k !== 'cerebro') cfg[k] = v;
-    return { ok: true, reiniciar, cerebro: parcial.cerebro || null };
+    for (const [k, v] of Object.entries(parcial)) cfg[k] = v;
+    // o cérebro grava a pasta e o servidor juntos e, se a fonte em uso mudou, troca na hora (sem reiniciar).
+    // Servidor que não responde volta como aviso (o resto ficou salvo).
+    const r = b.cerebro ? await trocaCerebro.ajustar(b.cerebro, cerebroValidado) : null;
+    return { ok: true, reiniciar: false, cerebro: b.cerebro ? { ...cfg.cerebro, fonte: cerebro.fonte.tipo } : null, aviso: r?.aviso || null };
   }));
   rota('POST', '/api/tema', erro400((_, b) => {
     exigir(require('./config').TEMAS[b.tema], 400, 'tema desconhecido');
@@ -315,6 +338,18 @@ function criarRotas({ cfg, cerebro, janelas, provedores, mcps, skills, escolherA
     } catch (e) { throw new ErroRota(400, e.message); }
   });
 
+  tarefas?.registrarRotas(rota); // quadro de tarefas do maestro (Lote 2)
+  cenas?.registrarRotas(rota, { erro400 }); // cenas: salvar o time e recriar (Lote 3)
+  // medidor de uso: tokens e custo estimado de cada janela aberta e o total de hoje (Lote 3)
+  rota('GET', '/api/uso', () => {
+    const uso = janelas.uso;
+    const sessoes = {};
+    for (const [id, j] of janelas.ativas) sessoes[id] = { provedor: j.provedor, uso: uso?.resumo(id) || null, mede: ['claude', 'codex'].includes(j.provedor) };
+    return {
+      sessoes, hoje: uso ? uso.hoje() : null,
+      explicacao: 'Tokens lidos das conversas que o Claude Code e o Codex gravam no disco. O custo é o preço de tabela da API (quem usa a conta/assinatura não paga por token): é só uma referência de tamanho. Gemini CLI e OpenCode ainda não gravam a conversa num arquivo que o Engram lê, então ficam sem medidor.',
+    };
+  });
   codigo?.registrarRotas(rota); // vista Código: arquivos, git e terminais da pasta aberta
   fluxos?.registrarRotas(rota); // vista Fluxos: o mapa do projeto em blocos, estilo n8n
   extensoes?.registrarRotas(rota); // extensões do VS Code (Open VSX): temas, ícones, realce e snippets
