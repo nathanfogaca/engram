@@ -75,6 +75,27 @@ function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, prove
     janelas.avisar({ tipo: 'palcos', acao: 'nome', n, nome });
     return { n, nome };
   });
+  // Apagar um palco: o lugar continua (são PALCOS fixos), vazio e com o nome de fábrica. Os agentes dele são
+  // encerrados (a conversa de cada um fica salva e dá para retomar pela gaveta Time); setores, automações,
+  // post-its e tarefas dele saem.
+  rota('POST', '/api/palcos/:n/apagar', p => {
+    const n = palcoValido(p.n);
+    exigir(n, 404, 'palco não encontrado');
+    const agentes = janelas.abertasNoPalco(n);
+    for (const id of agentes) { try { janelas.fechar(id); } catch { /* já tinha saído */ } }
+    const setores = cerebro.setores(n);
+    for (const s of setores) if (cerebro.setorApagar(s.id)) janelas.avisar({ tipo: 'setor', acao: 'removido', id: s.id });
+    const autos = automacoes.lista(n);
+    for (const a of autos) automacoes.remover(a.id);
+    const notas = automacoes.postits(n);
+    for (const x of notas) automacoes.postitRemover(x.id);
+    const tarefasFora = tarefas?.apagarDoPalco ? tarefas.apagarDoPalco(n) : 0;
+    const nome = `Palco ${n}`;
+    cerebro.palcoRenomear(n, nome);
+    janelas.avisar({ tipo: 'palcos', acao: 'nome', n, nome });
+    janelas.avisar({ tipo: 'palcos', acao: 'apagado', n, agentes });
+    return { n, nome, agentes: agentes.length, setores: setores.length, automacoes: autos.length, postits: notas.length, tarefas: tarefasFora };
+  });
   // automações do palco (cartão com orientação e horário, ligado a um agente) e post-its
   const comErro = fn => (...a) => { try { return fn(...a); } catch (e) { throw e instanceof ErroRota ? e : new ErroRota(400, e.message); } };
   rota('POST', '/api/automacoes', comErro((_, b) => automacoes.criar(b)));

@@ -76,6 +76,11 @@ export class Palcos {
       const p = this.lista.find(x => x.n === m.n);
       if (p) p.nome = m.nome;
       if (m.n === this.atual) this.pintarAtual();
+    } else if (m.tipo === "palcos" && m.acao === "apagado") {
+      for (const id of m.agentes || []) this.mapa.delete(id);
+      this.selos.delete(m.n);
+      this.cameras.delete(m.n);
+      if (m.n === this.atual) this.esvaziarTela();
     } else return;
     this.desenhar();
   }
@@ -160,14 +165,16 @@ export class Palcos {
     const selo = this.selos.get(p.n);
     const nome = el("b", { text: p.nome, title: "Duplo clique para renomear" });
     const lapis = el("button", { class: "palco-lapis", title: "Renomear o palco", "aria-label": "Renomear o palco" }, el("i", { class: "codicon codicon-edit" }));
+    const lixo = el("button", { class: "palco-lixo", title: "Apagar o palco (encerra os agentes dele)", "aria-label": "Apagar o palco" }, el("i", { class: "codicon codicon-trash" }));
     const linha = el("div", { class: `palco-linha${p.n === this.atual ? " atual" : ""}`, role: "menuitemradio", "aria-checked": String(p.n === this.atual), "data-n": p.n, tabindex: "0",
       title: p.n === this.atual ? "O palco que está na tela" : `Ir para ${p.nome}` },
       el("span", { class: "palco-num", text: p.n }),
       el("span", { class: "palco-nome" }, nome, el("small", { text: rotuloAgentes(ags.length) })),
       el("span", { class: "palco-ag" }, ...ags.slice(0, 8).map(a => el("i", { class: OCUPADO.has(a.estado) ? "ocupado" : ATENCAO.has(a.estado) ? "atencao" : "livre", title: `${a.nome}: ${a.estado || ""}` }))),
       selo ? el("span", { class: `selo${selo === "terminou" ? " terminou" : ""}`, title: selo === "atencao" ? "Um agente deste palco precisa de você" : "Um agente deste palco terminou" }) : null,
-      lapis);
-    linha.addEventListener("click", e => { if (!e.target.closest(".palco-lapis, input")) this.trocar(p.n); });
+      lapis, lixo);
+    linha.addEventListener("click", e => { if (!e.target.closest(".palco-lapis, .palco-lixo, input")) this.trocar(p.n); });
+    lixo.onclick = e => { e.stopPropagation(); this.apagar(p); };
     linha.addEventListener("keydown", e => { if (e.key === "Enter" && e.target === linha) this.trocar(p.n); });
     nome.addEventListener("dblclick", e => { e.stopPropagation(); this.renomear(p, nome); });
     lapis.onclick = e => { e.stopPropagation(); this.renomear(p, nome); };
@@ -204,6 +211,39 @@ export class Palcos {
     });
     campo.addEventListener("blur", () => fim(true));
     campo.addEventListener("click", e => e.stopPropagation());
+  }
+
+  /**
+   * Apaga o palco: o lugar continua na lista, vazio e com o nome de fábrica. Antes, a pessoa vê o que sai: os
+   * agentes são encerrados (a conversa fica salva) e os setores, automações, post-its e tarefas dele somem.
+   */
+  async apagar(p) {
+    let d;
+    try { d = await api(`/api/palco?palco=${p.n}`); } catch (e) { avisar({ texto: `Não deu para ler o palco: ${e.message}`, cor: "#ff6b7d" }); return; }
+    const conta = (n, um, varios) => (n ? (n === 1 ? um : `${n} ${varios}`) : null);
+    const ags = d.janelas?.length || 0;
+    const sai = [
+      conta(d.setores?.length, "1 setor", "setores"),
+      conta(d.automacoes?.length, "1 automação", "automações"),
+      conta(d.postits?.length, "1 post-it", "post-its"),
+    ].filter(Boolean);
+    if (!ags && !sai.length && p.nome === `Palco ${p.n}`) { avisar({ texto: `O ${p.nome} já está vazio`, cor: "#ffc857", tempo: 3500 }); return; }
+    const linhas = [`Apagar o ${p.nome}?`, ""];
+    if (ags) linhas.push(`${ags === 1 ? "1 agente é encerrado" : `${ags} agentes são encerrados`}. A conversa de cada um fica salva e dá para retomar pela aba Time.`);
+    linhas.push(`Saem também ${sai.length ? `${sai.join(", ")} e ` : ""}as tarefas do quadro deste palco.`);
+    linhas.push("", `O lugar continua na lista, vazio, com o nome "Palco ${p.n}".`);
+    if (!confirm(linhas.join("\n"))) return;
+    try {
+      const r = await api(`/api/palcos/${p.n}/apagar`, { method: "POST" });
+      avisar({ rota: `${p.nome} apagado`, texto: r.agentes ? `${r.agentes === 1 ? "1 agente encerrado" : `${r.agentes} agentes encerrados`}; as conversas ficam salvas` : "o palco ficou vazio", cor: "#4ade9f" });
+    } catch (e) { avisar({ texto: `Não apagou: ${e.message}`, cor: "#ff6b7d" }); }
+  }
+
+  /** O palco apagado é o da tela: os cartões saem (as linhas, setores, automações e post-its saem pelos avisos). */
+  esvaziarTela() {
+    this.aoAntes?.();
+    for (const id of [...this.palco.cartoes.keys()]) this.palco.remover(id);
+    this.aoDepois?.(this.atual);
   }
 
   // ---------------------------------------------------------------- a troca

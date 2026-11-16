@@ -141,6 +141,11 @@ class Tarefas {
       .all(...args).map(r => this.paraTela({ ...r }));
   }
 
+  /** O palco foi apagado: as tarefas dele saem do quadro. */
+  apagarDoPalco(palco) {
+    return this.q('DELETE FROM tarefas WHERE palco = ?').run(palco).changes;
+  }
+
   /** A devolutiva inteira (a mensagem que fechou a tarefa), para o "ver tudo" da tela. */
   devolutivaInteira(n) {
     const t = this.pegar(Number(n));

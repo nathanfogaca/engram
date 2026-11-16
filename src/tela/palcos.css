@@ -48,6 +48,9 @@
 .palco-lapis { flex: none; border: 0; background: none; color: var(--discreto); cursor: pointer; border-radius: 7px; padding: 3px 5px; opacity: 0; transition: opacity .15s, color .15s; }
 .palco-linha:hover .palco-lapis, .palco-lapis:focus-visible { opacity: 1; }
 .palco-lapis:hover { color: var(--texto-forte); background: rgb(var(--tinta) / .1); }
+.palco-lixo { flex: none; border: 0; background: none; color: var(--discreto); cursor: pointer; border-radius: 7px; padding: 3px 5px; opacity: 0; transition: opacity .15s, color .15s; }
+.palco-linha:hover .palco-lixo, .palco-lixo:focus-visible { opacity: 1; }
+.palco-lixo:hover { color: var(--perigo); background: rgb(255 107 125 / .14); }
 .palco-ag { flex: none; display: flex; gap: 3px; align-items: center; }
 .palco-ag i { width: 6px; height: 6px; border-radius: 50%; background: var(--apagado); }
 .palco-ag i.ocupado { background: var(--ciano); box-shadow: 0 0 6px var(--ciano); animation: respirar 1.2s ease-in-out infinite; }
