@@ -2,6 +2,7 @@
 
 const { posicaoValida, palcoValido } = require('./janelas');
 const { PALCOS } = require('./banco');
+const { AjustesDoAgente } = require('./ajustes-agente');
 
 class ErroRota extends Error {
   constructor(status, mensagem) { super(mensagem); this.status = status; }
@@ -233,6 +234,10 @@ function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, prove
   // erro com status próprio (ex.: 409 da cena de fora sem confirmação) mantém o status; o resto vira 400
   const erro400 = fn => async (...a) => { try { return await fn(...a); } catch (e) { throw e instanceof ErroRota ? e : new ErroRota(Number.isInteger(e.status) ? e.status : 400, e.message); } };
   const mudouMcps = () => { janelas.escreverGanchos(); janelas.avisar({ tipo: 'mcps' }); return mcps.listar(); };
+  // os ajustes pelas mãos de um agente (ferramentas ajustes e ajustar): a mudança só vale se a pessoa aceitar
+  janelas.ajustes = new AjustesDoAgente({ cfg, mcps, trocaCerebro, janelas, avisar: m => janelas.avisar(m), salvarConfig, mudouMcps, versao });
+  rota('GET', '/api/ajustes/pedido', () => janelas.ajustes.pendente());
+  rota('POST', '/api/ajustes/pedido/:id', erro400(async (p, b) => janelas.ajustes.responder(p.id, b.aceitar === true)));
   rota('GET', '/api/mcps', () => mcps.listar());
   rota('GET', '/api/mcps/encontrados', erro400(() => mcps.encontrados()));
   rota('POST', '/api/mcps', erro400(async (_, b) => { await mcps.salvar(b.def || {}, b.segredos || {}, b.id_antigo || null); return mudouMcps(); }));

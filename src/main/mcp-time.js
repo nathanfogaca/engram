@@ -66,6 +66,33 @@ function ferramentas(janelas) {
       }, ['setor']) },
     { name: 'remover_setor', description: 'Só para o maestro, quando a pessoa pedir. Tira um setor do palco; os agentes continuam onde estão.',
       inputSchema: objeto({ setor: { type: 'string', description: 'nome do setor' } }, ['setor']) },
+    { name: 'ajustes', description: 'Mostra os ajustes do Engram desta pessoa: onde está o cérebro (se o servidor falhou, o erro e a dica de conserto, e se o Engram enxerga a variável do token), os MCPs cadastrados (sem segredos), o contexto que vai em todas as janelas e alguns ajustes gerais. Veja antes de pedir mudança com ajustar.',
+      inputSchema: objeto({}), annotations: { readOnlyHint: true } },
+    { name: 'ajustar', description: 'Pede uma mudança nos ajustes do Engram. Nada muda sem a pessoa: o pedido aparece numa janela do Engram com o antes e o depois de cada item, e ela aceita ou recusa (a resposta volta aqui em até ~50 s; se ela demorar, confira depois com ajustes). Mande só o que muda. Dá para mudar: cerebro (usar o servidor ou o local, endereço, variável do token, certificado, pasta no servidor, pasta local); mcp (cadastrar ou atualizar um MCP HTTP); contexto (o texto inteiro que vai em todas as janelas novas; o atual vem em ajustes); gerais. Segredo nunca passa por você: cabeçalho com chave cita uma variável do Windows, ex.: "Authorization": "Bearer ${NOME_DA_VARIAVEL}". Diga em motivo por que está pedindo: a pessoa lê.',
+      inputSchema: objeto({
+        motivo: { type: 'string', description: 'por que mudar, em uma ou duas frases (a pessoa lê na tela)' },
+        cerebro: { type: 'object', properties: {
+          usar: { type: 'string', enum: ['servidor', 'local'] },
+          endereco: { type: 'string', description: 'URL do MCP do servidor, ex.: https://servidor.empresa.local:8766/mcp (o nome tem de ser o do certificado)' },
+          variavel_do_token: { type: 'string', description: 'nome da variável do Windows com o token (não o token)' },
+          certificado: { type: 'string', description: 'caminho do .crt do servidor, quando o certificado é próprio' },
+          pasta_no_servidor: { type: 'string', description: 'a pasta das notas no servidor' },
+          pasta_local: { type: 'string', description: 'a pasta das notas neste computador' },
+        }, additionalProperties: false },
+        mcp: { type: 'object', properties: {
+          id: { type: 'string', description: 'nome curto (letras, números, - e _); o mesmo de um existente atualiza' },
+          nome: { type: 'string' }, endereco: { type: 'string', description: 'https://.../mcp' },
+          cabecalhos: { type: 'object', description: '{ "Nome": "valor" }; valor de chave só como ${VARIAVEL}; vazio tira o cabeçalho', additionalProperties: { type: 'string' } },
+          agentes: { type: 'array', items: { type: 'string', enum: ['todos', 'claude', 'codex', 'gemini', 'opencode'] } },
+          liberar: { type: 'boolean', description: 'true: as ferramentas dele rodam sem pedir permissão' },
+          ativo: { type: 'boolean' },
+        }, required: ['id'], additionalProperties: false },
+        contexto: { type: 'string', description: 'o texto inteiro novo (substitui o atual)' },
+        gerais: { type: 'object', properties: {
+          max_janelas: { type: 'integer', minimum: 1, maximum: 64 }, pasta_trabalho: { type: 'string' },
+          pensamento_no_palco: { type: 'boolean' }, atualizar_sozinho: { type: 'boolean' },
+        }, additionalProperties: false },
+      }, ['motivo']) },
   ];
 }
 
@@ -105,6 +132,8 @@ async function tratar(janelas, sessao, m) {
         case 'criar_setor': return ok(texto(janelas.criarSetor(sessao, a)));
         case 'editar_setor': return ok(texto(janelas.editarSetor(sessao, a)));
         case 'remover_setor': return ok(texto(janelas.removerSetor(sessao, a)));
+        case 'ajustes': return ok(texto(janelas.ajustes ? JSON.stringify(janelas.ajustes.ver(), null, 2) : 'Os ajustes ainda não estão disponíveis: o Engram está abrindo.'));
+        case 'ajustar': return ok(texto(janelas.ajustes ? await janelas.ajustes.pedir(sessao, a) : 'Os ajustes ainda não estão disponíveis: o Engram está abrindo.'));
         default: return { jsonrpc: '2.0', id: m.id, error: { code: -32602, message: `ferramenta desconhecida: ${p.name}` } };
       }
     } catch (e) {

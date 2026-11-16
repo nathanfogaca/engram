@@ -19,6 +19,7 @@ import { PrimeiroUso } from "./primeiro-uso.js";
 import { VistaCodigo } from "./codigo.js";
 import { VistaFluxos } from "./fluxos.js";
 import { PainelPrevia, temPrevia } from "./previa.js";
+import { mostrarPedido, fecharPedido, conferirPedido } from "./pedido-ajustes.js";
 
 let palco, palcos, quadro, cenas, fonteCerebro, cerebro, gaveta, leitor, contas, ajustes, codigo, fluxos, previa;
 let idsNotas = new Set();
@@ -435,6 +436,10 @@ function tratar(m, repetido = false) {
   } else if (m.tipo === "postit") {
     if (m.acao === "removido") palco.automacoes.removerPostitLocal(m.id);
     else if (m.postit) palco.automacoes.receberPostit(m.postit);
+  } else if (m.tipo === "ajustes_pedido") {
+    mostrarPedido(m.pedido); // um agente pediu para mudar os ajustes: só vale se a pessoa aceitar
+  } else if (m.tipo === "ajustes_pedido_fim") {
+    fecharPedido(m.id);
   } else if (m.tipo === "mensagem") {
     palco.mensagem(m.de, m.para, m.fase);
     if (m.fase === "enviada") {
@@ -584,6 +589,7 @@ async function iniciar() {
   palco.carregar(estadoPalco);
   quadro.carregar();
   conectarAoVivo();
+  conferirPedido(); // pedido de ajuste que chegou com a tela fechada
   // um evento entre a primeira leitura e o conectarAoVivo se perde: relê o que o ao vivo teria trazido
   api("/api/estado").then(e => mostrarSinc({ rodando: e.sinc.rodando, resultado: e.sinc.ultimo, erro: e.sinc.erro })).catch(() => {});
   fonteCerebro.carregar();

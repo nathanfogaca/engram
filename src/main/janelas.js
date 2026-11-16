@@ -21,7 +21,7 @@ const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
 const { lerPergunta, TECLAS, TRABALHANDO } = require('./pergunta');
 const { notasDoComando, analisarCodex, resolver, trechosDoPatch, desescapar } = require('./notas-tocadas'); // linhas do cérebro e bolha do palco
 const OCUPADO_ESTADO = new Set(['pensando', 'trabalhando']);
-const FERRAMENTAS_TIME = ['equipe', 'palco', 'tarefas', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar'];
+const FERRAMENTAS_TIME = ['equipe', 'palco', 'tarefas', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar', 'ajustes', 'ajustar'];
 // as cores dos setores, as mesmas da tela (src/tela/js/setores.js)
 const CORES_SETOR = { violeta: '#8b7bff', ciano: '#38d6f5', magenta: '#e879f9', ambar: '#ffc857', verde: '#4ade9f', coral: '#ff7a6b' };
 const PESSOA = 'pessoa'; // remetente das mensagens que a pessoa digita na vista Conversa
