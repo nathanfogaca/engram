@@ -8,7 +8,11 @@ const path = require('node:path');
 const { execFile } = require('node:child_process');
 
 // O git devolve o caminho longo; nomes curtos do Windows (FULANO~1) e maiúsculas não podem atrapalhar a comparação.
-const real = p => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
+const real = p => {
+  try { return fs.realpathSync.native(p); } catch {
+    try { return path.join(fs.realpathSync.native(path.dirname(p)), path.basename(p)); } catch { return path.resolve(p); }
+  }
+};
 const paraRel = (base, abs) => path.relative(base, abs).split(path.sep).join('/');
 
 function rodar(programa, args, cwd, timeout = 120_000) {

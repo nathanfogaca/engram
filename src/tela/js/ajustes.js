@@ -6,8 +6,8 @@ import { $, $$, el, api, avisar } from "./util.js";
 import { COR_AGENTE } from "./contas.js";
 import { PainelGeral, PainelAparencia } from "./geral.js";
 
-const NOMES_AGENTE = { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI", opencode: "OpenCode" };
-const md = () => window.markdownit({ html: false, linkify: true });
+const NOMES_AGENTE = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", gemini: "Antigravity", opencode: "OpenCode" };
+const md = () => window.markdownit({ html: false, linkify: true }).disable("image");
 const botao = (texto, fn, classe = "btn pequeno", extra = {}) => el("button", { type: "button", class: classe, onclick: fn, ...extra }, texto);
 const chave = (ligado, fn, titulo = "") => {
   const input = el("input", { type: "checkbox", checked: ligado, onchange: e => fn(e.target.checked) });
@@ -82,7 +82,12 @@ class PainelMcps {
 
   async buscarEncontrados() {
     try { this.encontrados = await api("/api/mcps/encontrados"); } catch { this.encontrados = []; }
-    this.desenhar();
+    if (this.editando) {
+      const secao = $(".aj-secao", this.raiz);
+      if (secao) secao.replaceWith(this.blocoEncontrados());
+    } else {
+      this.desenhar();
+    }
   }
 
   aplicar(dados) { this.dados = dados; this.aoMudar?.(); this.desenhar(); }
@@ -164,7 +169,7 @@ class PainelMcps {
     const linhasEnv = this.pares(s.env || {}, "Variável", "API_KEY");
     const agentes = new Set(s.agentes);
     const chipsAgentes = el("div", { class: "aj-chips" });
-    const desenharChips = () => chipsAgentes.replaceChildren(...["todos", "claude", "codex", "gemini", "opencode"].map(a => el("button", {
+    const desenharChips = () => chipsAgentes.replaceChildren(...["todos", "claude", "codex", "antigravity", "opencode"].map(a => el("button", {
       type: "button", class: `aj-chip${agentes.has(a) ? " ativo" : ""}`, style: { "--c": COR_AGENTE[a] || "#a5b4fc" },
       onclick: () => {
         if (a === "todos") { agentes.clear(); agentes.add("todos"); } else { agentes.delete("todos"); agentes.has(a) ? agentes.delete(a) : agentes.add(a); if (!agentes.size) agentes.add("todos"); }
@@ -296,20 +301,20 @@ class PainelSkills {
       botao(el("span", { text: "+ Nova skill" }), () => { this.criando = !this.criando; this.desenhar(); }, "btn-brilho pequeno"),
       botao("Importar arquivo…", () => this.importar(false)),
       botao("Importar pasta…", () => this.importar(true)),
-      el("small", { class: "aj-nota", text: "No Claude Code entram como engram:<nome>. No Codex ficam instaladas na pasta de skills dele." }));
+      el("small", { class: "aj-nota", text: "No Claude Code e no Antigravity entram por janela. No Codex ficam instaladas na pasta de skills dele." }));
     const itens = [];
     if (this.criando) itens.push(this.formNova());
     this.dados.skills.forEach((s, i) => itens.push(this.cartao(s, i)));
     if (!this.dados.skills.length && !this.criando) {
       itens.push(el("div", { class: "aj-vazio" }, el("b", { text: "Nenhuma skill ainda." }),
-        el("span", { text: "Crie uma, importe um .zip/.skill ou traga as que você já tem no Claude Code e no Codex." })));
+        el("span", { text: "Crie uma, importe um .zip/.skill ou traga as que você já tem no Claude Code, Codex ou Antigravity." })));
     }
     this.raiz.replaceChildren(topo, el("div", { class: "aj-lista" }, ...itens), this.blocoEncontradas());
   }
 
   cartao(s, i) {
     const agentes = new Set(s.agentes);
-    const ajustar = async corpo => { try { this.aplicar(await api(`/api/skills/${s.nome}/ajustar`, { json: corpo })); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); } };
+    const ajustar = async corpo => { try { this.aplicar(await api(`/api/skills/${encodeURIComponent(s.nome)}/ajustar`, { json: corpo })); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); } };
     return el("article", { class: `aj-cartao skill${s.ativo ? "" : " desligado"}`, style: { "--i": i } },
       el("div", { class: "aj-topo" },
         el("span", { class: "aj-orbe skill", text: "✦" }),
@@ -318,14 +323,14 @@ class PainelSkills {
         chave(s.ativo, v => ajustar({ ativo: v }), s.ativo ? "Ligada" : "Desligada")),
       el("p", { class: "aj-desc", text: s.descricao || "(sem descrição)" }),
       s.erro ? el("div", { class: "aj-teste erro", text: s.erro }) : null,
-      el("div", { class: "aj-chips" }, ...["claude", "codex"].map(a => el("button", {
+      el("div", { class: "aj-chips" }, ...["claude", "codex", "antigravity"].map(a => el("button", {
         type: "button", class: `aj-chip${agentes.has(a) ? " ativo" : ""}`, style: { "--c": COR_AGENTE[a] },
         onclick: () => { agentes.has(a) ? agentes.delete(a) : agentes.add(a); ajustar({ agentes: [...agentes] }); },
       }, NOMES_AGENTE[a]))),
       el("div", { class: "aj-acoes" },
         botao("Editar", () => this.abrirEditor(s.nome)),
-        botao("Pasta", () => api(`/api/skills/${s.nome}/abrir-pasta`, { method: "POST" })),
-        confirmar("Remover", async () => { try { this.aplicar(await api(`/api/skills/${s.nome}/remover`, { method: "POST" })); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); } })));
+        botao("Pasta", () => api(`/api/skills/${encodeURIComponent(s.nome)}/abrir-pasta`, { method: "POST" })),
+        confirmar("Remover", async () => { try { this.aplicar(await api(`/api/skills/${encodeURIComponent(s.nome)}/remover`, { method: "POST" })); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); } })));
   }
 
   formNova() {
@@ -377,7 +382,7 @@ class PainelSkills {
   // ---------------------------------------------------------------- editor com prévia
 
   async abrirEditor(nome) {
-    try { this.editor = await api(`/api/skills/${nome}`); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); return; }
+    try { this.editor = await api(`/api/skills/${encodeURIComponent(nome)}`); } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); return; }
     this.desenhar();
   }
 
@@ -387,11 +392,12 @@ class PainelSkills {
     area.value = ed.texto;
     const previa = el("div", { class: "aj-previa conv-md" });
     const aviso = el("div", { class: "aj-aviso" });
+    const escRe = s => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const atualizar = () => {
       const t = area.value;
       const m = /^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(t);
       const cab = m ? m[1] : "";
-      const nomeOk = new RegExp(`^name:\\s*["']?${ed.nome}["']?\\s*$`, "m").test(cab);
+      const nomeOk = new RegExp(`^name:\\s*["']?${escRe(ed.nome)}["']?\\s*$`, "m").test(cab);
       const descOk = /^description:\s*\S/m.test(cab);
       const problemas = [!m && "falta o cabeçalho entre --- no início", m && !nomeOk && `o name tem de ser ${ed.nome}`, m && !descOk && "falta a description"].filter(Boolean);
       aviso.className = `aj-aviso ${problemas.length ? "ruim" : "bom"}`;
@@ -400,6 +406,7 @@ class PainelSkills {
       previa.replaceChildren(
         el("div", { class: "aj-previa-cab" }, el("b", { text: `✦ ${ed.nome}` }), el("small", { text: desc.replace(/^["']|["']$/g, "") })));
       previa.insertAdjacentHTML("beforeend", md().render(m ? t.slice(m[0].length) : t));
+      for (const a of previa.querySelectorAll("a")) { a.target = "_blank"; a.rel = "noopener noreferrer"; }
     };
     let espera;
     area.addEventListener("input", () => { clearTimeout(espera); espera = setTimeout(atualizar, 120); });
@@ -409,7 +416,7 @@ class PainelSkills {
     });
     const salvar = async () => {
       try {
-        this.editor = { ...(await api(`/api/skills/${ed.nome}/salvar`, { json: { texto: area.value } })) };
+        this.editor = { ...(await api(`/api/skills/${encodeURIComponent(ed.nome)}/salvar`, { json: { texto: area.value } })) };
         avisar({ texto: `${ed.nome} salva`, cor: "#4ade9f" });
         const d = await api("/api/skills"); this.dados = d;
       } catch (e) { avisar({ texto: e.message, cor: "#ff6b7d", tempo: 7000 }); }

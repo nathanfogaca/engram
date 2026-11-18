@@ -54,7 +54,7 @@ export const limitar = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ------------------------------------------------------------------ vocabulário visual
 
-export const COR_MODELO = { opus: "#f5c451", sonnet: "#38d6f5", haiku: "#8ef06a", fable: "#e879f9", gpt: "#7ee0c3", codex: "#7ee0c3", gemini: "#6aa8ff" };
+export const COR_MODELO = { opus: "#f5c451", sonnet: "#38d6f5", haiku: "#8ef06a", fable: "#e879f9", gpt: "#7ee0c3", codex: "#7ee0c3", antigravity: "#6aa8ff", gemini: "#6aa8ff", carbon: "#6aa8ff", argon: "#8fb2ff", hydrogen: "#38d6f5", flash: "#4ade9f", orchestrator: "#f5c451" };
 export function corModelo(id) {
   id = id || "";
   for (const [chave, cor] of Object.entries(COR_MODELO)) if (id.includes(chave)) return cor;

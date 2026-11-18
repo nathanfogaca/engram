@@ -71,11 +71,11 @@ class Previa {
 
   /** O caminho de verdade, só se estiver dentro da pasta e sem nenhum pedaço oculto. */
   seguro(base, rel) {
-    const partes = String(rel || '').split('/').filter(Boolean);
+    const partes = String(rel || '').split(/[\\/]+/).filter(Boolean);
     if (partes.some(p => p.startsWith('.') || p === '..')) return null;
     const alvo = path.resolve(base, ...partes);
     const r = path.relative(base, alvo);
-    if (r.startsWith('..') || path.isAbsolute(r)) return null;
+    if (r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r)) return null;
     return alvo;
   }
 
@@ -118,11 +118,17 @@ class Previa {
       if (ini >= info.size || ini > fim) { res.writeHead(416, { 'Content-Range': `bytes */${info.size}` }); return res.end(); }
       res.writeHead(206, { ...cab, 'Content-Range': `bytes ${ini}-${fim}/${info.size}`, 'Content-Length': fim - ini + 1 });
       if (req.method === 'HEAD') return res.end();
-      return fs.createReadStream(alvo, { start: ini, end: fim }).pipe(res);
+      const s = fs.createReadStream(alvo, { start: ini, end: fim });
+      s.on('error', () => res.destroy());
+      res.on('close', () => s.destroy());
+      return s.pipe(res);
     }
     res.writeHead(200, { ...cab, 'Content-Length': info.size });
     if (req.method === 'HEAD') return res.end();
-    fs.createReadStream(alvo).pipe(res);
+    const s = fs.createReadStream(alvo);
+    s.on('error', () => res.destroy());
+    res.on('close', () => s.destroy());
+    s.pipe(res);
   }
 
   /** Tudo o que a tela precisa para mostrar um arquivo. */

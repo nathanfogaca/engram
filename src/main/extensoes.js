@@ -29,7 +29,26 @@ function lerJsonc(texto) {
     else saida += c;
   }
   const limpo = saida.charCodeAt(0) === 0xfeff ? saida.slice(1) : saida;
-  return JSON.parse(limpo.replace(/,(\s*[}\]])/g, '$1'));
+  let final = '', str = false;
+  for (let i = 0; i < limpo.length; i++) {
+    const c = limpo[i];
+    if (str) {
+      final += c;
+      if (c === '\\') final += limpo[++i] ?? '';
+      else if (c === '"') str = false;
+    } else if (c === '"') {
+      str = true;
+      final += c;
+    } else if (c === ',') {
+      let j = i + 1;
+      while (j < limpo.length && /\s/.test(limpo[j])) j++;
+      if (limpo[j] === '}' || limpo[j] === ']') continue;
+      final += c;
+    } else {
+      final += c;
+    }
+  }
+  return JSON.parse(final);
 }
 const lerJsoncArquivo = arq => lerJsonc(fs.readFileSync(arq, 'utf8'));
 
@@ -48,9 +67,10 @@ function traduzir(rotulo, nls) {
 // ------------------------------------------------------------------ zip (o .vsix), sem programa de fora
 
 function lerZip(buf) {
+  const min = Math.max(0, buf.length - 65_557);
   let i = buf.length - 22;
-  while (i >= Math.max(0, buf.length - 65_557) && buf.readUInt32LE(i) !== 0x06054b50) i--;
-  if (i < 0) throw new Error('o pacote da extensão não é um zip válido');
+  while (i >= min && buf.readUInt32LE(i) !== 0x06054b50) i--;
+  if (i < min) throw new Error('o pacote da extensão não é um zip válido');
   const total = buf.readUInt16LE(i + 10);
   let p = buf.readUInt32LE(i + 16);
   const itens = [];
@@ -212,18 +232,23 @@ class Extensoes {
     if (!e) return null;
     const lista = (e.pkg.contributes || {})[chave] || [];
     const t = lista.find((x, i) => `${x.id || x.label || i}` === temaId || x.id === temaId);
-    return t ? { e, t, arquivo: path.resolve(e.raiz, t.path) } : null;
+    if (!t || !t.path) return null;
+    const arquivo = path.resolve(e.raiz, String(t.path));
+    const r = path.relative(e.raiz, arquivo);
+    if (r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r) || !fs.existsSync(arquivo)) return null;
+    return { e, t, arquivo };
   }
 
   temaCores(id) {
     const achado = this.acharTema(id, 'themes');
     if (!achado) return null;
     const ler = (arquivo, visto = new Set()) => {
-      if (visto.has(arquivo)) return { colors: {}, tokenColors: [] };
+      const r = path.relative(achado.e.raiz, arquivo);
+      if (visto.has(arquivo) || r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r) || !fs.existsSync(arquivo)) return { colors: {}, tokenColors: [] };
       visto.add(arquivo);
       const j = lerJsoncArquivo(arquivo);
       let base = { colors: {}, tokenColors: [] };
-      if (j.include) base = ler(path.resolve(path.dirname(arquivo), j.include), visto);
+      if (j.include) base = ler(path.resolve(path.dirname(arquivo), String(j.include)), visto);
       return { name: j.name, type: j.type, colors: { ...base.colors, ...(j.colors || {}) }, tokenColors: [...base.tokenColors, ...(Array.isArray(j.tokenColors) ? j.tokenColors : [])] };
     };
     const lido = ler(achado.arquivo);

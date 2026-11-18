@@ -59,12 +59,15 @@ class Conexao {
     this.processo = spawn(node, [script, ...args], { cwd: raiz, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
     this.processo.stdout.on('data', d => this.ler(d));
     this.processo.stderr.on('data', d => { this.ultimoErro = String(d).slice(-500); });
-    this.processo.on('exit', codigo => {
+    const encerrar = (codigo, erroMsg) => {
+      if (!this.vivo) return;
       this.vivo = false;
-      for (const { rejeitar } of this.esperando.values()) rejeitar(new Error('o servidor de linguagem fechou'));
+      for (const { rejeitar } of this.esperando.values()) rejeitar(new Error(erroMsg || 'o servidor de linguagem fechou'));
       this.esperando.clear();
-      this.aoFim?.(codigo, this.ultimoErro);
-    });
+      this.aoFim?.(codigo, erroMsg || this.ultimoErro);
+    };
+    this.processo.on('error', e => encerrar(-1, e.message));
+    this.processo.on('exit', codigo => encerrar(codigo));
     this.processo.stdin.on('error', () => {});
     this.vivo = true;
   }
@@ -233,7 +236,7 @@ class Linguagens {
         if (method === 'textDocument/publishDiagnostics') this.avisar({ tipo: 'lsp', evento: 'diagnosticos', servidor: id, uri: params.uri, diagnosticos: params.diagnostics || [] });
       },
       aoFim: (codigo, ultimo) => {
-        this.conexoes.delete(id);
+        if (this.conexoes.get(id)?.conexao === conexao) this.conexoes.delete(id);
         this.registrar?.(`servidor de linguagem ${id} fechou (código ${codigo})${ultimo ? `: ${ultimo.split('\n').slice(-2).join(' ')}` : ''}`);
         this.avisar({ tipo: 'lsp', evento: 'parou', servidor: id });
       },
@@ -241,7 +244,7 @@ class Linguagens {
     c = { conexao, raiz, pronto: false };
     c.inicio = conexao.iniciar().then(cap => { c.pronto = true; c.capacidades = cap; this.avisar({ tipo: 'lsp', evento: 'lista' }); });
     this.conexoes.set(id, c);
-    try { await c.inicio; } catch (e) { this.parar(id); throw e; }
+    try { await c.inicio; } catch (e) { if (this.conexoes.get(id) === c) this.parar(id); throw e; }
     return c;
   }
 

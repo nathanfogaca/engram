@@ -366,7 +366,27 @@ function lerJsonc(texto) {
     else if (c === "/" && p === "*") { i += 2; while (i < texto.length && !(texto[i] === "*" && texto[i + 1] === "/")) i++; i++; }
     else s += c;
   }
-  return JSON.parse(s.replace(/^﻿/, "").replace(/,(\s*[}\]])/g, "$1"));
+  const limpo = s.replace(/^﻿/, "");
+  let final = "", str = false;
+  for (let i = 0; i < limpo.length; i++) {
+    const c = limpo[i];
+    if (str) {
+      final += c;
+      if (c === "\\") final += limpo[++i] ?? "";
+      else if (c === '"') str = false;
+    } else if (c === '"') {
+      str = true;
+      final += c;
+    } else if (c === ",") {
+      let j = i + 1;
+      while (j < limpo.length && /\s/.test(limpo[j])) j++;
+      if (limpo[j] === "}" || limpo[j] === "]") continue;
+      final += c;
+    } else {
+      final += c;
+    }
+  }
+  return JSON.parse(final);
 }
 
 /** Liga (ou religa) o que as extensões ativas oferecem ao editor: linguagens, realce e snippets. */

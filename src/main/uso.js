@@ -3,7 +3,7 @@
 // - Claude Code: o "usage" de cada resposta no .jsonl da conversa. A mesma resposta aparece em várias linhas
 //   (uma por bloco), todas com o mesmo usage: conta uma vez por id de mensagem.
 // - Codex: os eventos token_count do rollout (last_token_usage de cada um; o modelo vem do turn_context).
-// - Gemini CLI e OpenCode: ainda não (não gravam a conversa num arquivo que o Engram lê).
+// - Antigravity e OpenCode: ainda não (não gravam a conversa num arquivo que o Engram lê).
 // O custo é o preço de tabela da API: quem usa a assinatura (conta) não paga por token, então é só uma
 // referência de tamanho. A pessoa pode trocar ou acrescentar preços no config.json (precos).
 
@@ -104,7 +104,12 @@ class Uso {
       const fh = await fsp.open(caminho, 'r');
       try { await fh.read(buf, 0, n, e.lido); } finally { await fh.close(); }
       const fim = buf.lastIndexOf(0x0a); // só linhas inteiras; o resto fica para a próxima
-      if (fim < 0) return false;
+      if (fim < 0) {
+        if (n === MAX_LEITURA) e.lido += n; // linha única maior que 16 MB: pula para não travar a leitura
+        else e.incompleto = true;
+        return false;
+      }
+      e.incompleto = false;
       texto = buf.subarray(0, fim + 1).toString('utf8');
       e.lido += fim + 1;
     }

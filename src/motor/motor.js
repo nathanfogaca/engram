@@ -81,12 +81,14 @@ const servidor = net.createServer(sock => {
   const prazo = setTimeout(() => { if (!autenticado) sock.destroy(); }, 5000);
   sock.on('data', pedaco => {
     buffer += pedaco;
+    if (!autenticado && buffer.length > 65_536) { sock.destroy(); return; }
     let i;
     while ((i = buffer.indexOf('\n')) >= 0) {
       const linha = buffer.slice(0, i);
       buffer = buffer.slice(i + 1);
       let msg;
       try { msg = JSON.parse(linha); } catch { continue; }
+      if (!msg || typeof msg !== 'object') continue;
       if (!autenticado) {
         const dado = Buffer.from(String(msg.token || ''));
         if (dado.length !== TOKEN.length || !crypto.timingSafeEqual(dado, TOKEN)) { sock.destroy(); return; }

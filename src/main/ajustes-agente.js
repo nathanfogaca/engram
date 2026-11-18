@@ -15,7 +15,7 @@ const VALIDADE_PEDIDO = 5 * 60_000; // sem resposta, o pedido some e nada muda
 const PARECE_SEGREDO = /authorization|token|key|secret|senha|password|cookie|bearer|credential|api[-_]?key/i;
 const SO_VARIAVEL = /^\s*(?:(?:Bearer|Basic|Token)\s+)?\$\{[A-Za-z_][A-Za-z0-9_]*\}\s*$/i;
 const ID_MCP = /^[A-Za-z0-9_-]{1,40}$/;
-const AGENTES = ['claude', 'codex', 'gemini', 'opencode'];
+const AGENTES = ['claude', 'codex', 'antigravity', 'opencode'];
 
 const curto = (t, n = 140) => { const s = String(t ?? ''); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
 const legivel = v => (v === true ? 'ligado' : v === false ? 'desligado' : v === null || v === undefined || v === '' ? '(vazio)' : String(v));
@@ -114,8 +114,11 @@ class AjustesDoAgente {
         }
       }
       if (x.agentes !== undefined) {
-        const l = (Array.isArray(x.agentes) ? x.agentes : [x.agentes]).map(y => String(y).toLowerCase());
-        def.agentes = !l.length || l.includes('todos') ? ['todos'] : l.filter(y => AGENTES.includes(y));
+        const l = (Array.isArray(x.agentes) ? x.agentes : [x.agentes]).map(y => {
+          const s = String(y).toLowerCase();
+          return s === 'gemini' ? 'antigravity' : s;
+        });
+        def.agentes = !l.length || l.includes('todos') ? ['todos'] : [...new Set(l.filter(y => AGENTES.includes(y)))];
         if (!def.agentes.length) throw new Error(`mcp.agentes: use "todos" ou ${AGENTES.join(', ')}`);
       }
       if (x.liberar !== undefined) def.liberar = !!x.liberar;
@@ -240,7 +243,7 @@ class AjustesDoAgente {
 
   paraTela(p) { return { id: p.id, quem: p.quem, motivo: p.motivo, itens: p.itens, avisos: p.avisos }; }
 
-  pendente() { return this.pedido ? this.paraTela(this.pedido) : null; }
+  pendente() { return this.pedido && !this.pedido.aplicando ? this.paraTela(this.pedido) : null; }
 
   encerrar(p, aceito, texto) {
     if (this.pedido === p) this.pedido = null;
@@ -252,16 +255,21 @@ class AjustesDoAgente {
   /** A pessoa respondeu na tela. Aceito: aplica na ordem (MCP, cérebro, contexto, geral) e conta o que deu. */
   async responder(id, aceitar) {
     const p = this.pedido;
-    if (!p || p.id !== id) throw new Error('esse pedido não está mais esperando');
+    if (!p || p.id !== id || p.aplicando) throw new Error('esse pedido não está mais esperando');
+    clearTimeout(p.prazo);
     if (!aceitar) { this.encerrar(p, false, 'A pessoa recusou o pedido: nada mudou.'); return { ok: true, resultado: null }; }
-    this.pedido = null; // ninguém pede outro enquanto este é aplicado
-    const feitos = [];
-    for (const f of p.acoes) {
-      try { feitos.push(await f()); } catch (e) { feitos.push(`não deu: ${e.message}`); }
+    p.aplicando = true; // mantém this.pedido ocupado até terminar para ninguém abrir outro no meio
+    try {
+      const feitos = [];
+      for (const f of p.acoes) {
+        try { feitos.push(await f()); } catch (e) { feitos.push(`não deu: ${e.message}`); }
+      }
+      const texto = `A pessoa aceitou. ${feitos.join(' · ')}`;
+      this.encerrar(p, true, texto);
+      return { ok: true, resultado: texto };
+    } finally {
+      if (this.pedido === p) this.pedido = null;
     }
-    const texto = `A pessoa aceitou. ${feitos.join(' · ')}`;
-    this.encerrar(p, true, texto);
-    return { ok: true, resultado: texto };
   }
 }
 

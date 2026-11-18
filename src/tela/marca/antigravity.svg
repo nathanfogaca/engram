@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="agy-grad" x1="28" y1="228" x2="228" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="50%" stop-color="#6AA8FF"/>
+      <stop offset="100%" stop-color="#A8C7FA"/>
+    </linearGradient>
+  </defs>
+  <path d="M128 24L36 220h42l21-48h58l21 48h42L128 24zm-13 112l13-31 13 31h-26z" fill="url(#agy-grad)"/>
+  <circle cx="128" cy="196" r="14" fill="#6AA8FF"/>
+</svg>

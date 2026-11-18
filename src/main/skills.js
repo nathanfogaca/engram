@@ -12,7 +12,7 @@ const { execFile } = require('node:child_process');
 const YAML = require('yaml');
 
 const NOME = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const AGENTES_SKILL = ['claude', 'codex'];
+const AGENTES_SKILL = ['claude', 'codex', 'antigravity'];
 const MARCA = '.engram';
 
 function frontmatter(texto) {
@@ -41,6 +41,7 @@ class Skills {
     this.dir = path.join(dados, 'skills');
     this.arqEstado = path.join(dados, 'skills.json');
     this.plugin = path.join(dados, 'plugin-claude');
+    this.pluginAntigravity = path.join(dados, 'plugin-antigravity-skills');
     this.codex = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'skills');
     this.registrar = registrar || (() => {});
     fs.mkdirSync(this.dir, { recursive: true });
@@ -112,7 +113,7 @@ class Skills {
     this.caminho(nome);
     const c = this.config(nome);
     if (ativo !== undefined) c.ativo = !!ativo;
-    if (Array.isArray(agentes)) c.agentes = agentes.filter(a => AGENTES_SKILL.includes(a));
+    if (Array.isArray(agentes)) c.agentes = [...new Set(agentes.map(a => (a === 'gemini' ? 'antigravity' : a)).filter(a => AGENTES_SKILL.includes(a)))];
     this.estado[nome] = c;
     this.gravarEstado();
     this.sincronizar();
@@ -166,6 +167,7 @@ class Skills {
     };
     olhar(path.join(os.homedir(), '.claude', 'skills'), 'Claude Code');
     olhar(this.codex, 'Codex');
+    olhar(path.join(os.homedir(), '.gemini', 'config', 'skills'), 'Antigravity');
     return saida;
   }
 
@@ -174,7 +176,12 @@ class Skills {
     return fs.existsSync(path.join(this.plugin, 'skills')) && fs.readdirSync(path.join(this.plugin, 'skills')).length ? this.plugin : null;
   }
 
-  /** Remonta o plugin do Claude e as skills do Engram dentro do Codex. Vale para janelas novas. */
+  /** Pasta de skills ativas para o Antigravity (null se nenhuma skill ativa vale para o Antigravity). */
+  pluginParaAntigravity() {
+    return fs.existsSync(this.pluginAntigravity) && fs.readdirSync(this.pluginAntigravity).length ? this.pluginAntigravity : null;
+  }
+
+  /** Remonta o plugin do Claude, do Antigravity e as skills do Engram dentro do Codex. Vale para janelas novas. */
   sincronizar() {
     const ativas = this.listar().filter(s => s.ativo && !s.erro);
     try {
@@ -183,6 +190,14 @@ class Skills {
       fs.writeFileSync(path.join(this.plugin, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'engram', description: 'Skills da biblioteca do Engram', version: '1.0.0' }, null, 2));
       for (const s of ativas.filter(x => x.agentes.includes('claude'))) fs.cpSync(path.join(this.dir, s.nome), path.join(this.plugin, 'skills', s.nome), { recursive: true });
     } catch (e) { this.registrar(`skills (Claude): ${e.message}`); }
+    try {
+      fs.rmSync(this.pluginAntigravity, { recursive: true, force: true });
+      const paraAgy = ativas.filter(x => x.agentes.includes('antigravity') || x.agentes.includes('gemini'));
+      if (paraAgy.length) {
+        fs.mkdirSync(this.pluginAntigravity, { recursive: true });
+        for (const s of paraAgy) fs.cpSync(path.join(this.dir, s.nome), path.join(this.pluginAntigravity, s.nome), { recursive: true });
+      }
+    } catch (e) { this.registrar(`skills (Antigravity): ${e.message}`); }
     try {
       const querem = new Set(ativas.filter(x => x.agentes.includes('codex')).map(x => `engram-${x.nome}`));
       let existentes = [];

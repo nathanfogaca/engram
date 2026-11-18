@@ -1,12 +1,12 @@
-// Contas e agentes: cada CLI de agente (Claude Code, Codex, Gemini CLI, OpenCode) com o seu login.
+// Contas e agentes: cada CLI de agente (Claude Code, Codex, Antigravity, OpenCode) com o seu login.
 // Entrar e instalar abrem um terminal de verdade aqui dentro; chaves de API vão para o cofre do Windows.
 
 import { $, el, api, avisar } from "./util.js";
 
-export const COR_AGENTE = { claude: "#ff9f6b", codex: "#7ee0c3", gemini: "#6aa8ff", opencode: "#c9a7ff" };
-const LETRA = { claude: "C", codex: "X", gemini: "G", opencode: "O" };
+export const COR_AGENTE = { claude: "#ff9f6b", codex: "#7ee0c3", antigravity: "#6aa8ff", gemini: "#6aa8ff", opencode: "#c9a7ff" };
+const LETRA = { claude: "C", codex: "X", antigravity: "A", gemini: "A", opencode: "O" };
 // o ícone de cada agente (o mesmo do site); agente sem ícone fica com a letra
-const LOGO = { claude: "marca/claude.png", codex: "marca/codex.png", gemini: "marca/gemini.png", opencode: "marca/opencode.svg" };
+const LOGO = { claude: "marca/claude.png", codex: "marca/codex.png", antigravity: "marca/antigravity.svg", gemini: "marca/antigravity.svg", opencode: "marca/opencode.svg" };
 
 /** O ícone do agente: o logo dele, com o brilho na cor do agente; sem logo, a letra no orbe. */
 export function iconeAgente(id, classe = "conta-orbe") {
@@ -54,7 +54,7 @@ export class Contas {
 
   desenhar() {
     if (!this.dados.length) {
-      this.lista.replaceChildren(...["claude", "codex", "gemini", "opencode"].map(id =>
+      this.lista.replaceChildren(...["claude", "codex", "antigravity", "opencode"].map(id =>
         el("article", { class: "conta fantasma", style: { "--cor": COR_AGENTE[id] } }, iconeAgente(id))));
       return;
     }
@@ -75,7 +75,7 @@ export class Contas {
     if (!p.instalado) {
       botoes.push(botao("Instalar", () => this.terminalDe(p, "instalar"), "btn-brilho pequeno"));
     } else {
-      if (p.pode_entrar && !p.conectado) botoes.push(botao(p.id === "gemini" ? "Abrir para entrar" : "Entrar", () => this.terminalDe(p, "entrar"), "btn-brilho pequeno"));
+      if (p.pode_entrar && !p.conectado) botoes.push(botao(p.id === "antigravity" || p.id === "gemini" ? "Abrir para entrar" : "Entrar", () => this.terminalDe(p, "entrar"), "btn-brilho pequeno"));
       if (p.pode_sair && p.conectado && p.modo === "conta") botoes.push(botao("Sair", () => this.terminalDe(p, "sair")));
       if (p.chave) {
         if (p.tem_chave) {

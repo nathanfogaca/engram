@@ -12,7 +12,7 @@ const { opcoesDeConexao } = require('./tls-proprio');
 const { spawn } = require('node:child_process');
 
 const ID = /^[A-Za-z0-9_-]{1,40}$/;
-const AGENTES = ['claude', 'codex', 'gemini', 'opencode'];
+const AGENTES = ['claude', 'codex', 'antigravity', 'opencode'];
 const COFRE = '\u0000cofre'; // marca no arquivo: o valor está no cofre do Windows
 const PARECE_SEGREDO = /authorization|token|key|secret|senha|password|cookie|bearer|credential|api[-_]?key/i;
 
@@ -33,7 +33,11 @@ class Mcps {
   ler() {
     try {
       const d = JSON.parse(fs.readFileSync(this.arquivo, 'utf8').replace(/^﻿/, ''));
-      return { servidores: Array.isArray(d.servidores) ? d.servidores : [], so_engram: !!d.so_engram };
+      const servidores = (Array.isArray(d.servidores) ? d.servidores : []).map(s => ({
+        ...s,
+        agentes: Array.isArray(s.agentes) ? [...new Set(s.agentes.map(a => (a === 'gemini' ? 'antigravity' : a)))] : ['todos'],
+      }));
+      return { servidores, so_engram: !!d.so_engram };
     } catch { return { servidores: [], so_engram: false }; }
   }
 
@@ -69,9 +73,10 @@ class Mcps {
     if (id === 'engram') throw new Error('"engram" é o nome reservado das ferramentas do time');
     if (idAntigo !== id && this.achar(id)) throw new Error(`já existe um MCP chamado ${id}`);
     const tipo = def.tipo === 'stdio' ? 'stdio' : 'http';
+    const agentesNorm = Array.isArray(def.agentes) ? def.agentes.map(a => (a === 'gemini' ? 'antigravity' : a)) : [];
     const s = {
       id, nome: String(def.nome || id).slice(0, 60), tipo, ativo: def.ativo !== false,
-      agentes: Array.isArray(def.agentes) && def.agentes.length && !def.agentes.includes('todos') ? def.agentes.filter(a => AGENTES.includes(a)) : ['todos'],
+      agentes: agentesNorm.length && !agentesNorm.includes('todos') ? [...new Set(agentesNorm.filter(a => AGENTES.includes(a)))] : ['todos'],
       liberar: !!def.liberar, origem: def.origem ? String(def.origem).slice(0, 80) : undefined,
     };
     if (tipo === 'http') {
@@ -141,7 +146,10 @@ class Mcps {
     this.gravar();
   }
 
-  valeParaAgente(s, provedor) { return s.agentes.includes('todos') || s.agentes.includes(provedor); }
+  valeParaAgente(s, provedor) {
+    const p = provedor === 'gemini' ? 'antigravity' : provedor;
+    return s.agentes.includes('todos') || s.agentes.includes(p);
+  }
 
   /** Os MCPs ativos para um agente (lista leve, para a tela de novo agente). */
   ativosPara(provedor) {
@@ -203,6 +211,10 @@ class Mcps {
       const d = JSON.parse(fs.readFileSync(path.join(this.cfg.pasta_trabalho, '.mcp.json'), 'utf8'));
       for (const [nome, x] of Object.entries(d.mcpServers || {})) saida.push(daClaude(nome, x, '.mcp.json da pasta de trabalho'));
     } catch { /* sem .mcp.json */ }
+    try {
+      const d = JSON.parse(fs.readFileSync(path.join(casa, '.gemini', 'config', 'mcp_config.json'), 'utf8'));
+      for (const [nome, x] of Object.entries(d.mcpServers || {})) saida.push(daClaude(nome, x, 'Antigravity'));
+    } catch { /* sem config do Antigravity */ }
     const codex = this.provedores.comando('codex');
     if (codex) {
       const { rodar } = require('./provedores');
@@ -270,7 +282,7 @@ async function postar(url, corpo, headers, ca, sessao) {
     const req = mod.request(u, opcoes, res => {
       let texto = '';
       res.setEncoding('utf8');
-      res.on('data', c => { texto += c; if (texto.length > 4_000_000) req.destroy(); });
+      res.on('data', c => { texto += c; if (texto.length > 4_000_000) req.destroy(new Error('a resposta do servidor MCP é grande demais')); });
       res.on('end', () => resolve({ status: res.statusCode, tipo: String(res.headers['content-type'] || ''), sessao: res.headers['mcp-session-id'] || sessao, texto, autenticar: res.headers['www-authenticate'] }));
     });
     req.on('timeout', () => req.destroy(new Error('o servidor não respondeu em 15 s')));
@@ -315,7 +327,13 @@ function testarStdio(s) {
       filho = spawn(exe, [...pre, ...(s.args || [])], { cwd: s.cwd || os.homedir(), env: { ...process.env, ...s.env }, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) { return resolve({ ok: false, erro: traduzirErro(e) }); }
     let buffer = '', erroTexto = '', fim = false, ini = null;
-    const terminar = r => { if (fim) return; fim = true; clearTimeout(relogio); try { filho.kill(); } catch { /* já saiu */ } resolve(r); };
+    const matar = () => {
+      try {
+        if (process.platform === 'win32' && filho.pid) spawn('taskkill', ['/pid', String(filho.pid), '/T', '/F'], { windowsHide: true }).on('error', () => {});
+        else filho.kill();
+      } catch { /* já saiu */ }
+    };
+    const terminar = r => { if (fim) return; fim = true; clearTimeout(relogio); matar(); resolve(r); };
     const relogio = setTimeout(() => terminar({ ok: false, erro: `não respondeu em 25 s${erroTexto ? `: ${erroTexto.trim().split('\n').pop().slice(0, 200)}` : ''}` }), 25_000);
     const mandar = m => { try { filho.stdin.write(JSON.stringify(m) + '\n'); } catch { /* fechou */ } };
     filho.on('error', e => terminar({ ok: false, erro: traduzirErro(e) }));

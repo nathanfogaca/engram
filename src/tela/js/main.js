@@ -54,11 +54,12 @@ async function abrirNota(id) {
 }
 
 async function focarAgente(id) {
+  const jaNoPalco = app.vista === "palco";
   trocarVista("palco");
   // o agente está em outro palco: vai até lá primeiro (ninguém é encerrado ou movido por isso)
   const n = palcos?.mapa.get(id)?.palco;
   if (n && n !== palcos.atual && !(await palcos.trocar(n))) return;
-  setTimeout(() => palco.focar(id), app.vista === "palco" ? 0 : 200);
+  setTimeout(() => palco.focar(id), jaNoPalco ? 0 : 200);
 }
 
 function abrirLeitor(id) {
@@ -496,10 +497,10 @@ async function iniciar() {
   });
   previa = new PainelPrevia();
   codigo = new VistaCodigo($("#codigo"), {
-    agentes: () => [...palco.cartoes.values()].filter(c => c.viva).map(c => ({ id: c.info.id, nome: c.info.nome, estado: c.info.estado })),
+    agentes: () => [...palco.cartoes.values()].filter(c => c.viva).map(c => ({ id: c.info.id, nome: c.info.nome, estado: c.estado || c.info.estado })),
   });
   fluxos = new VistaFluxos($("#fluxos"), {
-    agentes: () => [...palco.cartoes.values()].filter(c => c.viva).map(c => ({ id: c.info.id, nome: c.info.nome, estado: c.info.estado })),
+    agentes: () => [...palco.cartoes.values()].filter(c => c.viva).map(c => ({ id: c.info.id, nome: c.info.nome, estado: c.estado || c.info.estado })),
     corDe: id => palco.cartoes.get(id)?.cor || null,
     abrirArquivo: rel => { trocarVista("codigo"); codigo.abrirDeFora(rel); },
   });

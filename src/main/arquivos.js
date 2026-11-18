@@ -22,17 +22,23 @@ class Arquivos {
   static nomeSeguro(nome) {
     nome = path.basename(String(nome || '').replace(/\\/g, '/')).replace(PROIBIDO, '_').replace(/^[ .]+|[ .]+$/g, '');
     if (!nome || nome === '.' || nome === '..') nome = 'arquivo';
-    if (RESERVADOS.has(nome.split('.')[0].toUpperCase())) nome = `_${nome}`;
+    if (RESERVADOS.has(nome.split('.')[0].trim().toUpperCase())) nome = `_${nome}`;
     if (nome.length > 120) {
       const ext = path.extname(nome).slice(0, 10);
-      nome = nome.slice(0, 110 - ext.length) + ext;
+      const base = nome.slice(0, 110 - ext.length).replace(/[ .]+$/g, '') || 'arquivo';
+      nome = base + ext;
     }
     return nome;
   }
 
   caminhoNovo(id, qual, nome) {
     if (!PASTAS.includes(qual)) throw new Error('pasta inválida');
-    let destino = path.join(this.pasta(id), qual, Arquivos.nomeSeguro(nome));
+    let seguro = Arquivos.nomeSeguro(nome);
+    if (seguro.length > 105) {
+      const ext = path.extname(seguro).slice(0, 10);
+      seguro = (seguro.slice(0, 105 - ext.length).replace(/[ .]+$/g, '') || 'arquivo') + ext;
+    }
+    let destino = path.join(this.pasta(id), qual, seguro);
     const ext = path.extname(destino), base = destino.slice(0, destino.length - ext.length);
     for (let n = 2; fs.existsSync(destino); n++) destino = `${base} (${n})${ext}`;
     return destino;

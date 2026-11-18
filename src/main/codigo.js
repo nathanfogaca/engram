@@ -59,7 +59,7 @@ class Codigo {
     const raiz = this.raiz;
     const alvo = path.resolve(raiz, String(rel || ''));
     const r = path.relative(raiz, alvo);
-    if (r.startsWith('..') || path.isAbsolute(r)) throw new Error('esse caminho está fora da pasta aberta');
+    if (r === '..' || r.startsWith(`..${path.sep}`) || path.isAbsolute(r)) throw new Error('esse caminho está fora da pasta aberta');
     return alvo;
   }
 
@@ -100,7 +100,8 @@ class Codigo {
 
   renomear(de, para) {
     const a = this.dentro(de), b = this.dentro(para);
-    if (!de || !para) throw new Error('nome vazio');
+    const raiz = path.resolve(this.raiz);
+    if (!de || !para || path.resolve(a) === raiz || path.resolve(b) === raiz) throw new Error('nome vazio');
     if (fs.existsSync(b) && a.toLowerCase() !== b.toLowerCase()) throw new Error('já existe um arquivo ou pasta com esse nome');
     fs.mkdirSync(path.dirname(b), { recursive: true });
     fs.renameSync(a, b);
@@ -108,8 +109,9 @@ class Codigo {
   }
 
   async lixeira(rel) {
-    if (!rel) throw new Error('a própria pasta aberta não vai para a lixeira por aqui');
-    await shell.trashItem(this.dentro(rel));
+    const alvo = this.dentro(rel);
+    if (!rel || path.resolve(alvo) === path.resolve(this.raiz)) throw new Error('a própria pasta aberta não vai para a lixeira por aqui');
+    await shell.trashItem(alvo);
     return { ok: true };
   }
 

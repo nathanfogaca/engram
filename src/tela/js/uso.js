@@ -7,7 +7,7 @@ import { el, api, nomeModelo, movimentoReduzido } from "./util.js";
 
 const ROW = 36;
 const ZERO = { entrada: 0, cache_escrita: 0, cache_lida: 0, saida: 0, custo: 0, sem_preco: 0, respostas: 0 };
-const SEM_MEDIDOR = /gemini|opencode/i;
+const SEM_MEDIDOR = /antigravity|gemini|opencode/i;
 export const NOTA_CUSTO = "Custo estimado pelo preço de tabela da API; quem usa assinatura (conta) não paga por token. É só para ter noção do tamanho.";
 
 const n1 = v => v.toFixed(1).replace(".", ",");
@@ -58,7 +58,7 @@ export class PainelUso {
       el("div", { class: "uso-rodape" },
         el("div", { class: "uso-total" }, this.total, this.estimado, this.totalTxt),
         this.todos,
-        el("div", { class: "uso-nota" }, NOTA_CUSTO, " ", el("b", { text: "Codex mostra só tokens (sem preço). " }), "Gemini CLI e OpenCode: sem medidor (não gravam a conversa num arquivo que o Engram lê).")));
+        el("div", { class: "uso-nota" }, NOTA_CUSTO, " ", el("b", { text: "Codex mostra só tokens (sem preço). " }), "Antigravity e OpenCode: sem medidor (não gravam a conversa num arquivo que o Engram lê).")));
   }
 
   async carregar() {

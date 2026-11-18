@@ -184,11 +184,13 @@ class Janelas {
   async motorCaiu() {
     if (this.reconectando) return;
     this.reconectando = true;
-    for (const j of this.ativas.values()) {
-      j.viva = false;
-      for (const cb of j.ouvintes) cb(null);
+    for (const mapa of [this.ativas, this.auxiliares, this.terminais]) {
+      for (const j of mapa.values()) {
+        j.viva = false;
+        for (const cb of j.ouvintes) cb(null);
+      }
+      mapa.clear();
     }
-    this.ativas.clear();
     this.avisar({ tipo: 'aviso', texto: 'o motor dos agentes caiu: reabrindo o time' });
     for (;;) {
       try { await this.motor.conectar(); await this.reconciliar(); break; } catch { await new Promise(r => setTimeout(r, 5000)); }
@@ -206,7 +208,7 @@ class Janelas {
     s.posicao = this.cerebro.posicao(id);
     s.aberta = this.ativas.has(id);
     if (s.aberta) { s.estado = this.ativas.get(id).estado; s.pergunta = this.ativas.get(id).pergunta; }
-    s.provedor = s.provedor || 'claude';
+    s.provedor = (s.provedor === 'gemini' ? 'antigravity' : s.provedor) || 'claude';
     s.palco = s.palco || 1;
     s.agente = this.provedores.adaptador(s.provedor)?.nome || s.provedor;
     s.nome_modelo = this.provedores.nomeModelo(s.provedor, s.modelo);
@@ -217,6 +219,7 @@ class Janelas {
   }
 
   async abrir({ nome, modelo = '', papel = 'livre', provedor = 'claude', retomar = null, posicao = null, ligarA = null, tarefa = null, mcps = undefined, palco = null }) {
+    provedor = (provedor === 'gemini' ? 'antigravity' : provedor) || 'claude';
     nome = String(nome || '').replace(/[\x00-\x1f\x7f"]/g, '').trim().slice(0, 40) || 'agente';
     const adaptador = this.provedores.adaptador(provedor);
     if (!adaptador) throw new Error('agente desconhecido');
@@ -244,7 +247,7 @@ class Janelas {
       const onde = (arq && conversa.pastaDe(arq)) || s.pasta;
       if (onde && fs.existsSync(onde)) cwd = onde;
       if (provedor === 'claude') { if (!arq || cwd !== onde) continuar = false; }
-      else if (!(provedor === 'codex' && s.externo)) continuar = false; // só o Codex (com o id dele) também retoma
+      else if (!(['codex', 'antigravity'].includes(provedor) && s.externo)) continuar = false; // Codex e Antigravity (com o id da conversa) também retomam
     }
 
     let prompt = this.cfg.prompt_base.replaceAll('{nome}', nome).replaceAll('{pasta}', pastaArquivos)
@@ -262,7 +265,9 @@ class Janelas {
       pastas: [pastaArquivos, ...this.pastasDoCerebro()],
       mcpUrl: `http://127.0.0.1:${this.cfg.porta}/mcp`, token: this.token, dirJanelas: this.caminhos.janelas,
       arquivoGanchos: this.arquivoGanchos, runtime: this.motor.runtime, chave: await this.provedores.chaveParaJanela(provedor),
-      mcps: listaMcps, soEngram: !!this.mcps?.estado.so_engram, pluginSkills: this.skills?.pluginParaClaude() || null,
+      mcps: listaMcps, soEngram: !!this.mcps?.estado.so_engram,
+      pluginSkills: this.skills?.pluginParaClaude() || null,
+      pluginSkillsAntigravity: this.skills?.pluginParaAntigravity() || null,
     });
     const argv = [...comando, ...montado.argv];
 
@@ -297,7 +302,17 @@ class Janelas {
       else this.cerebro.posicaoSalvar(id, ...this.lugarLivre(null, { proprio: id, w: antiga.w, h: antiga.h, perto: antiga, palco: noPalco }));
     }
     if (ligarA && this.ativas.has(ligarA)) this.cerebro.conectar(ligarA, id);
-    if (tarefa) this.enfileirar(j, tarefa[0], tarefa[1]);
+    if (tarefa) {
+      const infoT = {};
+      this.enfileirar(j, tarefa[0], tarefa[1], null, infoT);
+      try {
+        if (this.ehMaestro(tarefa[0])) {
+          const tn = this.tarefas?.delegou(tarefa[0], id, tarefa[1], infoT.n, null);
+          const item = tn ? j.caixa.find(([n]) => n === infoT.n) : null;
+          if (item) item[2] += `\n\n(No quadro do maestro esta é a tarefa ${tn}. Ao devolver o resultado, comece com "Tarefa ${tn}:".)`;
+        }
+      } catch { /* o quadro nunca atrapalha a entrega */ }
+    }
     const info = this.info(id);
     if (retomar && !continuar) info.conversa_nova = true;
     this.avisar({ tipo: 'sessao', sessao: info });
@@ -778,7 +793,7 @@ class Janelas {
     this.uso.atualizar(id, j.provedor, j.conversa).then(mudou => {
       if (mudou) this.avisar({ tipo: 'uso', sessao_id: id, uso: this.uso.resumo(id) });
       const e = this.uso.sessoes.get(id);
-      if (mudou && e && !j.conversa.endsWith('.zst') && e.lido < j.conversaTam) setTimeout(() => this.medirUso(id, j), 50);
+      if (e && !j.conversa.endsWith('.zst') && e.lido < j.conversaTam && !e.incompleto && !e.lendo) setTimeout(() => this.medirUso(id, j), 50);
     }).catch(() => {});
   }
 
@@ -1430,7 +1445,13 @@ class Janelas {
 
   entregarArquivo(de, caminho, nome) {
     try {
-      const destino = this.arquivos.copiar(de, 'entregues', caminho, nome, this.cfg.max_arquivo_mb * 1048576);
+      const base = this.ativas.get(de)?.pasta || this.cfg.pasta_trabalho || '';
+      const abs = path.resolve(base, String(caminho || ''));
+      const proibido = this.anexoProibido(abs) || this.anexoProibido(real(abs));
+      if (proibido) return `Não deu para entregar: ${abs} ${proibido}.`;
+      const destino = this.arquivos.copiar(de, 'entregues', abs, nome, this.cfg.max_arquivo_mb * 1048576);
+      const j = this.ativas.get(de);
+      if (j) j.arquivosAssinatura = this.arquivos.assinatura(de);
       this.avisar({ tipo: 'arquivos', sessao_id: de, entregues: [path.basename(destino)] });
       return `Entregue: ${path.basename(destino)}. A pessoa vê na área de arquivos da sua janela.`;
     } catch (e) {
@@ -1515,6 +1536,7 @@ class Janelas {
     const espera = a.enterDepois || 400;
     j.ocupadoAte = Date.now() + espera + 5000;
     setTimeout(() => {
+      if (!j.viva) { j.entregando = false; return; }
       j.escrever('\r');
       j.entregando = false;
       this.cerebro.mensagemEntregue(n);
@@ -1540,6 +1562,7 @@ class Janelas {
     const evento = String(dados.evento || '');
     if (dados.externo) this.registrarExterno(id, dados.externo);
     if (evento === 'Stop') { j.teveTurno = true; j.ocupadoAte = 0; }
+    else if (['UserPromptSubmit', 'PreToolUse', 'PostToolUse'].includes(evento)) j.ocupadoAte = Date.now() + 30_000;
     const ferramenta = dados.ferramenta || null;
     const entrada = dados.entrada && typeof dados.entrada === 'object' ? dados.entrada : {};
     let estado = ESTADO_POR_EVENTO[evento] || null;
@@ -1576,13 +1599,13 @@ class Janelas {
     if (!ferramenta) return [];
     const saida = [];
     if (this.fonte.tipo === 'pasta') {
-      if (['Read', 'Write', 'Edit', 'MultiEdit'].includes(ferramenta)) {
+      if (['Read', 'Write', 'Edit', 'MultiEdit', 'read_file', 'write_file', 'edit_file'].includes(ferramenta)) {
         const n = this.nota(entrada.file_path);
-        if (n) saida.push([n[0], ferramenta === 'Read' ? 'leu' : 'gravou', n[1]]);
+        if (n) saida.push([n[0], (ferramenta === 'Read' || ferramenta === 'read_file') ? 'leu' : 'gravou', n[1]]);
       } else if (ferramenta === 'Grep' && entrada.path) {
         const n = this.nota(entrada.path);
         if (n) saida.push([n[0], 'leu', n[1]]);
-      } else if (['Bash', 'PowerShell'].includes(ferramenta) && entrada.command) {
+      } else if (['Bash', 'PowerShell', 'run_command'].includes(ferramenta) && entrada.command) {
         // o agente abriu ou gravou a nota por comando (Get-Content, cat, Set-Content, redirecionamento...)
         saida.push(...this.notasCitadas(notasDoComando(entrada.command, [base])));
       }
@@ -1623,7 +1646,7 @@ class Janelas {
     const lista = toques.filter(([d, t]) => !vistos.has(`${d}|${t}`) && vistos.add(`${d}|${t}`));
     for (const [destino, tipo, rel] of lista) {
       this.cerebro.registrarToque(id, destino, tipo);
-      if (tipo === 'gravou' && rel) this.cerebro.sincronizarArquivo(rel).then(erro => this.avisar({ tipo: 'cerebro', mudou: rel, erro }));
+      if (tipo === 'gravou' && rel) this.cerebro.sincronizarArquivo(rel).then(erro => this.avisar({ tipo: 'cerebro', mudou: rel, erro })).catch(() => {});
     }
     return lista;
   }

@@ -66,7 +66,7 @@ function importar({ cerebro, caminhos, salvarConfig, dir = PADRAO, pararAntigo =
       ins.run(s.id, s.nome, s.modelo || '', s.papel || 'livre', s.pasta || ajustes.pasta_trabalho || os.homedir(), s.criada, aberto ? null : (s.encerrada || s.criada), aberto ? 'iniciando' : 'encerrada', aberto ? 1 : 0);
     }
     for (const p of a.posicoes) db.prepare('INSERT OR IGNORE INTO posicoes VALUES (?,?,?,?,?)').run(p.id, p.x, p.y, p.w, p.h);
-    for (const c of a.conexoes) db.prepare('INSERT OR IGNORE INTO conexoes VALUES (?,?,?)').run(c.a, c.b, c.criada);
+    for (const c of a.conexoes) db.prepare('INSERT OR IGNORE INTO conexoes (a, b, criada) VALUES (?,?,?)').run(c.a, c.b, c.criada);
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   // arquivos de cada agente

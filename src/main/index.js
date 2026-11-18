@@ -6,7 +6,11 @@ const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, ipcMain, protocol, net, shell, Tray, Menu, nativeImage, safeStorage, dialog, Notification } = require('electron');
 
 // Cópia de teste com dados próprios (não mexe no Engram de todo dia)
-if (process.env.ENGRAM_DADOS) app.setPath('userData', path.resolve(process.env.ENGRAM_DADOS));
+if (process.env.ENGRAM_DADOS) {
+  const dirTeste = path.resolve(process.env.ENGRAM_DADOS);
+  app.commandLine.appendSwitch('user-data-dir', dirTeste);
+  app.setPath('userData', dirTeste);
+}
 
 const config = require('./config');
 const banco = require('./banco');
@@ -48,10 +52,11 @@ const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'engram', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!process.env.ENGRAM_DADOS && !app.requestSingleInstanceLock()) app.quit();
 
 let janela = null;
 let nucleo = null;
+let nucleoPromessa = null;
 
 function avisar(msg) {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('aovivo', msg);
@@ -228,10 +233,11 @@ function registrarProtocolo() {
 
 function registrarIpc() {
   ipcMain.handle('api', async (_e, { metodo, caminho, corpo }) => {
+    if (!nucleo && nucleoPromessa) { try { nucleo = await nucleoPromessa; } catch { /* segue */ } }
     if (!nucleo) return { ok: false, status: 503, erro: 'o Engram ainda está abrindo' };
     return nucleo.rotas(String(metodo || 'GET'), String(caminho || ''), corpo);
   });
-  const assinaturas = new Map(); // `${webContentsId}:${id}` -> parar()
+  const assinaturas = new Map(); // `${webContentsId}:${id}` -> limpiar()
   ipcMain.on('terminal:abrir', (e, id) => {
     const chave = `${e.sender.id}:${id}`;
     assinaturas.get(chave)?.();
@@ -241,9 +247,10 @@ function registrarIpc() {
       else e.sender.send('terminal:dados', { id, dados: texto });
     });
     if (!sub) { e.sender.send('terminal:dados', { id, dados: '\r\n\x1b[2m[esta janela não está aberta]\x1b[0m\r\n', inicio: true }); return; }
-    assinaturas.set(chave, sub.parar);
+    const aoDestruir = () => { sub.parar(); assinaturas.delete(chave); };
+    e.sender.once('destroyed', aoDestruir);
+    assinaturas.set(chave, () => { e.sender.removeListener('destroyed', aoDestruir); sub.parar(); });
     e.sender.send('terminal:dados', { id, dados: sub.historico, inicio: true, colunas: sub.colunas, linhas: sub.linhas });
-    e.sender.once('destroyed', () => { sub.parar(); assinaturas.delete(chave); });
   });
   ipcMain.on('terminal:entrada', (_e, { id, dados }) => nucleo?.janelas.escrever(id, String(dados).slice(0, 65_536)));
   ipcMain.on('terminal:tamanho', (_e, { id, colunas, linhas }) => nucleo?.janelas.redimensionar(id, colunas, linhas));
@@ -365,7 +372,8 @@ app.whenReady().then(async () => {
   registrarIpc();
   try { criarBandeja(); } catch (e) { config.registrar(`bandeja: ${e.message}`); }
   criarJanela();
-  nucleo = await iniciarNucleo();
+  nucleoPromessa = iniciarNucleo();
+  nucleo = await nucleoPromessa;
 });
 
 // Sem janela e sem bandeja, o app sai. Os agentes NÃO saem: continuam no motor.

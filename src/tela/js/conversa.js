@@ -472,6 +472,7 @@ export class Leitor {
     this.conv = new Conversa(id, { cor: c.cor, grande: true, nome: c.info.nome, aoTerminal: () => this.aoTerminal(id) });
     $("#leitor-corpo").replaceChildren(this.conv.el);
     this.conv.carregar();
+    if (c.conv?.perguntaAtual) this.conv.pergunta(c.conv.perguntaAtual);
     this.conv.estado(c.estado);
     this.abas();
     this.raiz.classList.add("aberto");

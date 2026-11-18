@@ -373,7 +373,7 @@ function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, prove
     for (const [id, j] of janelas.ativas) sessoes[id] = { provedor: j.provedor, uso: uso?.resumo(id) || null, mede: ['claude', 'codex'].includes(j.provedor) };
     return {
       sessoes, hoje: uso ? uso.hoje() : null,
-      explicacao: 'Tokens lidos das conversas que o Claude Code e o Codex gravam no disco. O custo é o preço de tabela da API (quem usa a conta/assinatura não paga por token): é só uma referência de tamanho. Gemini CLI e OpenCode ainda não gravam a conversa num arquivo que o Engram lê, então ficam sem medidor.',
+      explicacao: 'Tokens lidos das conversas que o Claude Code e o Codex gravam no disco. O custo é o preço de tabela da API (quem usa a conta/assinatura não paga por token): é só uma referência de tamanho. Antigravity e OpenCode ainda não gravam a conversa num arquivo que o Engram lê, então ficam sem medidor.',
     };
   });
   codigo?.registrarRotas(rota); // vista Código: arquivos, git e terminais da pasta aberta
@@ -389,11 +389,11 @@ function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, prove
       if (r.metodo !== metodo) continue;
       const m = r.re.exec(url.pathname);
       if (!m) continue;
-      const params = Object.fromEntries(r.nomes.map((n, i) => [n, decodeURIComponent(m[i + 1])]));
       try {
+        const params = Object.fromEntries(r.nomes.map((n, i) => [n, decodeURIComponent(m[i + 1])]));
         return { ok: true, dados: await r.fn(params, corpo || {}, url.searchParams) };
       } catch (e) {
-        return { ok: false, status: e.status || 500, erro: e.message || 'erro no Engram' };
+        return { ok: false, status: e instanceof URIError ? 400 : (e.status || 500), erro: e.message || 'erro no Engram' };
       }
     }
     return { ok: false, status: 404, erro: `não existe: ${metodo} ${url.pathname}` };

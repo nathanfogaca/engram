@@ -7,7 +7,7 @@ ipcRenderer.on('terminal:dados', (_e, { id, dados, inicio, colunas, linhas }) =>
   const t = terminais.get(id);
   if (!t) return;
   if (inicio) t.aoInicio?.({ colunas, linhas });
-  t.aoDados(dados);
+  t.aoDados?.(dados);
 });
 ipcRenderer.on('terminal:fim', (_e, id) => { terminais.get(id)?.aoFim?.(); terminais.delete(id); });
 
@@ -20,12 +20,18 @@ contextBridge.exposeInMainWorld('engram', {
   },
   terminal: {
     abrir(id, { aoInicio, aoDados, aoFim }) {
-      terminais.set(id, { aoInicio, aoDados, aoFim });
+      const atual = { aoInicio, aoDados, aoFim };
+      terminais.set(id, atual);
       ipcRenderer.send('terminal:abrir', id);
       return {
         enviar: dados => ipcRenderer.send('terminal:entrada', { id, dados }),
         tamanho: (colunas, linhas) => ipcRenderer.send('terminal:tamanho', { id, colunas, linhas }),
-        fechar: () => { terminais.delete(id); ipcRenderer.send('terminal:fechar', id); },
+        fechar: () => {
+          if (terminais.get(id) === atual) {
+            terminais.delete(id);
+            ipcRenderer.send('terminal:fechar', id);
+          }
+        },
       };
     },
   },

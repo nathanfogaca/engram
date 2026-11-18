@@ -71,7 +71,7 @@ motor (src/motor/motor.js, Node puro, fora da pasta de instalação)
   cache lida, cache escrita e um custo estimado (o preço de tabela da API: para quem usa a conta ou
   assinatura, é só uma referência de tamanho).
   - Lê o que o Claude Code (`.jsonl`) e o Codex (`token_count` do rollout) gravam no disco.
-  - Gemini CLI e OpenCode ficam sem medidor: não gravam a conversa num arquivo que o Engram lê.
+  - Antigravity e OpenCode ficam sem medidor: não gravam a conversa num arquivo que o Engram lê.
   - Preços próprios entram no `config.json` (`precos`).
 - **Dados:** `%APPDATA%\Engram` (banco, config.json, arquivos, cérebro local).
 
@@ -183,7 +183,7 @@ A aba **Contas** mostra cada CLI de agente: se está instalado, a versão e o lo
 |---|---|---|---|---|---|---|
 | Claude Code | `claude auth login` ou `ANTHROPIC_API_KEY` | `--mcp-config` | `--append-system-prompt-file` | ganchos | sim | `--resume` |
 | Codex | `codex login` ou `CODEX_API_KEY` | `-c mcp_servers.engram…` (aprovado só para o Engram) | `-c developer_instructions` | `notify` + tela | sim (`~/.codex/sessions`) | `codex resume <id>` |
-| Gemini CLI (experimental) | o próprio CLI pergunta; ou `GEMINI_API_KEY` | settings de sistema por janela | `GEMINI.md` numa pasta incluída | tela | não (abre no Terminal) | abre de novo |
+| Antigravity | o próprio CLI (`agy`) pergunta; ou `GEMINI_API_KEY` | plugin por janela (`mcp_config.json`) | `AGENTS.md` / `GEMINI.md` (`--add-dir`) | ganchos + tela | não (abre no Terminal) | `agy --conversation <id>` |
 | OpenCode (experimental) | `opencode auth login` | `OPENCODE_CONFIG_CONTENT` | `instructions` | tela | não (abre no Terminal) | abre de novo |
 
 - **Testado neste PC:**

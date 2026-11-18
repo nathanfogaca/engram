@@ -83,7 +83,7 @@ function ferramentas(janelas) {
           id: { type: 'string', description: 'nome curto (letras, números, - e _); o mesmo de um existente atualiza' },
           nome: { type: 'string' }, endereco: { type: 'string', description: 'https://.../mcp' },
           cabecalhos: { type: 'object', description: '{ "Nome": "valor" }; valor de chave só como ${VARIAVEL}; vazio tira o cabeçalho', additionalProperties: { type: 'string' } },
-          agentes: { type: 'array', items: { type: 'string', enum: ['todos', 'claude', 'codex', 'gemini', 'opencode'] } },
+          agentes: { type: 'array', items: { type: 'string', enum: ['todos', 'claude', 'codex', 'antigravity', 'opencode'] } },
           liberar: { type: 'boolean', description: 'true: as ferramentas dele rodam sem pedir permissão' },
           ativo: { type: 'boolean' },
         }, required: ['id'], additionalProperties: false },
@@ -121,8 +121,8 @@ async function tratar(janelas, sessao, m) {
         case 'enviar': return ok(texto(janelas.enviar(sessao, String(a.para || ''), String(a.mensagem || ''), a.arquivos)));
         case 'ver_tela': return ok(texto(janelas.verTela(sessao, String(a.quem || ''), a.linhas ?? 60)));
         case 'fluxos': return ok(texto(janelas.fluxos ? janelas.fluxos.paraAgente() : 'Os fluxos não estão disponíveis.'));
-        case 'fluxo_desenhar': return ok(texto(janelas.fluxos.desenhar(sessao, a.fluxo)));
-        case 'fluxo_marcar': return ok(texto(janelas.fluxos.marcar(sessao, a)));
+        case 'fluxo_desenhar': return ok(texto(janelas.fluxos ? janelas.fluxos.desenhar(sessao, a.fluxo) : 'Os fluxos não estão disponíveis.'));
+        case 'fluxo_marcar': return ok(texto(janelas.fluxos ? janelas.fluxos.marcar(sessao, a) : 'Os fluxos não estão disponíveis.'));
         case 'entregar_arquivo': return ok(texto(janelas.entregarArquivo(sessao, String(a.caminho || ''), a.nome)));
         case 'criar_agente': return ok(texto(await janelas.criarAgente(sessao, String(a.nome || ''), String(a.papel || 'livre'), String(a.modelo || ''), a.tarefa, a.agente ? String(a.agente) : null, a.setor ? String(a.setor) : '')));
         case 'ligar': return ok(texto(janelas.ligarJanelas(sessao, String(a.a ?? ''), String(a.b ?? ''))));

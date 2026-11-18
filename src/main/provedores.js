@@ -1,4 +1,4 @@
-// Provedores de agente: cada CLI (Claude Code, Codex, Gemini CLI, OpenCode) diz como é achado,
+// Provedores de agente: cada CLI (Claude Code, Codex, Antigravity, OpenCode) diz como é achado,
 // instalado, logado e aberto numa janela do Engram, como o time (MCP) e o prompt entram nele,
 // e como o estado da janela é lido (ganchos, aviso de fim de turno ou a própria tela).
 
@@ -145,45 +145,102 @@ const ADAPTADORES = {
     },
   },
 
-  gemini: {
-    nome: 'Gemini CLI',
+  antigravity: {
+    nome: 'Antigravity',
     empresa: 'Google',
-    comando: 'gemini',
-    candidatos: [],
-    instalar: 'npm install -g @google/gemini-cli',
-    site: 'https://github.com/google-gemini/gemini-cli',
-    entrar: [], // o próprio Gemini CLI pergunta como entrar (Google ou chave) na primeira vez
+    comando: 'agy',
+    candidatos: [
+      path.join(LOCAL, 'agy', 'bin', 'agy.exe'),
+      path.join(LOCAL, 'Programs', 'Antigravity', 'bin', 'agy.exe'),
+    ],
+    instalar: 'irm https://antigravity.google/cli/install.ps1 | iex',
+    site: 'https://antigravity.google/docs',
+    entrar: [], // na primeira vez o próprio Antigravity CLI abre o login Google
     sair: null,
     chave: { env: 'GEMINI_API_KEY', rotulo: 'Chave de API do Gemini', exemplo: 'AIza…', site: 'https://aistudio.google.com/apikey' },
     ganchos: false,
-    experimental: true,
-    ocupado: /esc to cancel/i,
-    pergunta: /Allow execution|Apply this change\?|Waiting for user confirmation|Do you want to proceed/i,
-    modelos: () => [{ id: '', nome: 'Padrão do Gemini CLI' }],
+    experimental: false,
+    ocupado: /esc to cancel|Thinking\.\.\.|\(thinking\)|Generating/i,
+    pergunta: /Allow execution|Apply this change\?|Waiting for user confirmation|Do you want to proceed|Blocked/i,
+    modelos: () => [
+      { id: '', nome: 'Padrão do Antigravity' },
+      { id: 'gemini-4-carbon-high', nome: 'Gemini 4 Carbon (High)', resumo: 'Raciocínio profundo e código complexo' },
+      { id: 'gemini-4-carbon-medium', nome: 'Gemini 4 Carbon (Medium)', resumo: 'Equilíbrio entre inteligência e velocidade' },
+      { id: 'gemini-4-carbon-low', nome: 'Gemini 4 Carbon (Low)', resumo: 'Carbon com resposta mais rápida' },
+      { id: 'gemini-4-argon-high', nome: 'Gemini 4 Argon (High)', resumo: 'Alta precisão para tarefas exigentes' },
+      { id: 'gemini-4-argon-medium', nome: 'Gemini 4 Argon (Medium)', resumo: 'Uso geral equilibrado' },
+      { id: 'gemini-4-argon-low', nome: 'Gemini 4 Argon (Low)', resumo: 'Argon rápido' },
+      { id: 'gemini-4-hydrogen-xhigh', nome: 'Gemini 4 Hydrogen (XHigh)', resumo: 'Esforço máximo de raciocínio' },
+      { id: 'gemini-4-hydrogen-high', nome: 'Gemini 4 Hydrogen (High)', resumo: 'Alta capacidade analítica' },
+      { id: 'gemini-4-hydrogen-medium', nome: 'Gemini 4 Hydrogen (Medium)', resumo: 'Equilibrado' },
+      { id: 'gemini-4-hydrogen-low', nome: 'Gemini 4 Hydrogen (Low)', resumo: 'Leve e rápido' },
+      { id: 'gemini-3.8-flash-high', nome: 'Gemini 3.8 Flash (High)', resumo: 'Rápido com raciocínio reforçado' },
+      { id: 'gemini-3.8-flash-medium', nome: 'Gemini 3.8 Flash (Medium)', resumo: 'Rápido para tarefas diretas' },
+      { id: 'gemini-3.8-flash-low', nome: 'Gemini 3.8 Flash (Low)', resumo: 'Mais rápido e econômico' },
+      { id: 'gemini-pro-orchestrator', nome: 'Orchestrator (Carbon)', resumo: 'Coordenação e planejamento (Carbon)' },
+      { id: 'gemini-pro-orchestrator-argon', nome: 'Orchestrator (Argon)', resumo: 'Coordenação e planejamento (Argon)' },
+      { id: 'claude-opus-4-6-thinking', nome: 'Claude Opus 4.6 (Thinking)', resumo: 'Opus 4.6 no Antigravity' },
+      { id: 'claude-sonnet-4-6', nome: 'Claude Sonnet 4.6 (Thinking)', resumo: 'Sonnet 4.6 no Antigravity' },
+      { id: 'gpt-oss-120b-medium', nome: 'GPT-OSS 120B (Medium)', resumo: 'Modelo aberto 120B' },
+    ],
     async status() {
       const pasta = path.join(CASA, '.gemini');
-      if (fs.existsSync(path.join(pasta, 'oauth_creds.json'))) return { conectado: true, como: 'conta Google' };
+      for (const arq of [
+        path.join(pasta, 'oauth_creds.json'),
+        path.join(pasta, 'google_accounts.json'),
+        path.join(pasta, 'antigravity-cli', 'jetski_state.pbtxt'),
+      ]) {
+        try { if (fs.existsSync(arq) && fs.statSync(arq).size > 20) return { conectado: true, como: 'conta Google' }; } catch { /* segue */ }
+      }
       return { conectado: false };
     },
     montar(c) {
-      // o prompt do Engram entra como GEMINI.md de uma pasta incluída; o MCP do time, pelas configurações de sistema
-      const dir = path.join(c.dirJanelas, `${c.id}.gemini`);
-      fs.mkdirSync(dir, { recursive: true });
+      // O prompt, o MCP do time, os ganchos e as skills entram numa pasta de workspace (--add-dir) com um plugin nativo
+      const dir = path.join(c.dirJanelas, `${c.id}.antigravity`);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* segue */ }
+      const dirPlugin = path.join(dir, '.agents', 'plugins', 'engram');
+      fs.mkdirSync(path.join(dirPlugin, 'rules'), { recursive: true });
       fs.writeFileSync(path.join(dir, 'GEMINI.md'), c.prompt, 'utf8');
-      const ajustes = path.join(dir, 'settings.json');
-      const env = {};
-      const mcpServers = { engram: { httpUrl: c.mcpUrl, headers: { 'X-Engram-Token': '${ENGRAM_TOKEN}', 'X-Engram-Sessao': c.id }, trust: true } };
-      (c.mcps || []).forEach((s, i) => {
-        const refs = obj => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, `\${${variavel(env, i, k, v)}}`]));
+      fs.writeFileSync(path.join(dir, 'AGENTS.md'), c.prompt, 'utf8');
+      fs.writeFileSync(path.join(dirPlugin, 'rules', 'AGENTS.md'), c.prompt, 'utf8');
+      fs.writeFileSync(path.join(dirPlugin, 'plugin.json'), JSON.stringify({
+        name: 'engram', description: 'Integração Engram', version: '1.0.0',
+      }, null, 2), 'utf8');
+
+      const mcpUrlSessao = `${c.mcpUrl}?sessao=${encodeURIComponent(c.id)}&token=${encodeURIComponent(c.token)}`;
+      const mcpServers = {
+        engram: { url: mcpUrlSessao, headers: { 'X-Engram-Token': c.token, 'X-Engram-Sessao': c.id } },
+      };
+      (c.mcps || []).forEach(s => {
         mcpServers[s.id] = s.tipo === 'http'
-          ? { httpUrl: s.url, headers: refs(s.headers), trust: !!s.liberar }
-          : { command: s.comando, args: s.args || [], env: refs(s.env), trust: !!s.liberar };
+          ? { url: s.url, ...(Object.keys(s.headers || {}).length ? { headers: s.headers } : {}) }
+          : { command: s.comando, args: s.args || [], ...(Object.keys(s.env || {}).length ? { env: s.env } : {}) };
       });
-      fs.writeFileSync(ajustes, JSON.stringify({ mcpServers, context: { loadMemoryFromIncludeDirectories: true } }, null, 2));
+      fs.writeFileSync(path.join(dirPlugin, 'mcp_config.json'), JSON.stringify({ mcpServers }, null, 2), 'utf8');
+
+      if (c.runtime?.node && c.runtime?.gancho) {
+        const cmd = `"${c.runtime.node.replace(/\\/g, '/')}" "${c.runtime.gancho.replace(/\\/g, '/')}"`;
+        const hooks = {
+          engram: {
+            SessionStart: [{ command: `${cmd} SessionStart`, timeout: 5 }],
+            PreInvocation: [{ command: `${cmd} UserPromptSubmit`, timeout: 5 }],
+            PreToolUse: [{ matcher: '.*', hooks: [{ command: `${cmd} PreToolUse`, timeout: 5 }] }],
+            PostToolUse: [{ matcher: '.*', hooks: [{ command: `${cmd} PostToolUse`, timeout: 5 }] }],
+            Stop: [{ command: `${cmd} Stop`, timeout: 5 }],
+          },
+        };
+        fs.writeFileSync(path.join(dirPlugin, 'hooks.json'), JSON.stringify(hooks, null, 2), 'utf8');
+      }
+
+      if (c.pluginSkillsAntigravity && fs.existsSync(c.pluginSkillsAntigravity)) {
+        try { fs.cpSync(c.pluginSkillsAntigravity, path.join(dirPlugin, 'skills'), { recursive: true }); } catch { /* segue */ }
+      }
+
       const argv = [];
-      if (c.modelo) argv.push('-m', c.modelo);
-      argv.push('--include-directories', [dir, ...c.pastas].join(','));
-      return { argv, env: { ...env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: ajustes, ...(c.chave ? { GEMINI_API_KEY: c.chave } : {}) } };
+      if (c.retomar && c.externo) argv.push('--conversation', c.externo);
+      if (c.modelo) argv.push('--model', c.modelo);
+      for (const p of [dir, ...c.pastas]) argv.push('--add-dir', p);
+      return { argv, env: { ...(c.chave ? { GEMINI_API_KEY: c.chave } : {}) } };
     },
   },
 
@@ -249,12 +306,20 @@ function resolverAtalho(caminho) {
   try {
     const texto = fs.readFileSync(caminho, 'utf8');
     const m = /"%(?:dp0|~dp0)%\\?([^"]+?\.(?:c?js|mjs))"/i.exec(texto);
-    if (!m) return null;
-    const script = path.join(path.dirname(caminho), m[1]);
-    const local = path.join(path.dirname(caminho), 'node.exe');
-    const node = fs.existsSync(local) ? local : acharNoPath('node');
-    return node && fs.existsSync(script) ? [node, script] : null;
-  } catch { return null; }
+    if (m) {
+      const script = path.join(path.dirname(caminho), m[1]);
+      const local = path.join(path.dirname(caminho), 'node.exe');
+      const node = fs.existsSync(local) ? local : acharNoPath('node');
+      if (node && fs.existsSync(script)) return [node, script];
+    }
+  } catch { /* segue para cmd.exe */ }
+  const cmdExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+  return [cmdExe, '/d', '/s', '/c', caminho];
+}
+
+function normalizarId(id) {
+  const s = String(id || '');
+  return s === 'gemini' ? 'antigravity' : s;
 }
 
 function acharNoPath(nome) {
@@ -282,21 +347,32 @@ class Provedores {
   }
 
   ids() { return Object.keys(ADAPTADORES); }
-  adaptador(id) { return Object.hasOwn(ADAPTADORES, String(id)) ? ADAPTADORES[id] : null; } // só os de verdade (nada de "constructor")
+  adaptador(id) {
+    const k = normalizarId(id);
+    return Object.hasOwn(ADAPTADORES, k) ? ADAPTADORES[k] : null;
+  } // só os de verdade (nada de "constructor")
 
   /** Comando para abrir o CLI ([exe] ou [node, script]); null se não está instalado. */
   comando(id) {
+    id = normalizarId(id);
     const a = ADAPTADORES[id];
     if (!a) return null;
-    const proprio = (this.cfg.executaveis || {})[id] || (id === 'claude' ? this.cfg.claude_exe : '');
+    const execs = this.cfg.executaveis || {};
+    const proprio = execs[id] || (id === 'antigravity' ? execs.gemini : '') || (id === 'claude' ? this.cfg.claude_exe : '');
     for (const c of [proprio, ...a.candidatos]) if (c && fs.existsSync(c)) return resolverAtalho(c);
     const achado = acharNoPath(a.comando);
     return achado ? resolverAtalho(achado) : null;
   }
 
-  modoConta(id) { return (this.cfg.contas || {})[id]?.modo === 'chave' ? 'chave' : 'conta'; }
+  modoConta(id) {
+    id = normalizarId(id);
+    const contas = this.cfg.contas || {};
+    const cfgConta = contas[id] || (id === 'antigravity' ? contas.gemini : null);
+    return cfgConta?.modo === 'chave' ? 'chave' : 'conta';
+  }
 
   async info(id, forcar = false) {
+    id = normalizarId(id);
     const guardado = this.cache.get(id);
     if (!forcar && guardado && Date.now() - guardado.quando < 120_000) return guardado.info;
     const a = ADAPTADORES[id];
@@ -309,7 +385,11 @@ class Provedores {
       modo: this.modoConta(id), tem_chave: false, conectado: false, como: null, conta: null, plano: null,
       modelos: a.modelos(),
     };
-    if (a.chave) { try { info.tem_chave = !!(await this.cofre.ler(id)); } catch (e) { info.erro_cofre = e.message; } }
+    if (a.chave) {
+      try {
+        info.tem_chave = !!(await this.cofre.ler(id)) || (id === 'antigravity' && !!(await this.cofre.ler('gemini')));
+      } catch (e) { info.erro_cofre = e.message; }
+    }
     if (cmd) {
       const v = await rodar(cmd, ['--version'], { timeout: 10_000 });
       info.versao = (/\d+\.\d+(\.\d+)?[\w.-]*/.exec(v.saida) || [null])[0];
@@ -334,22 +414,26 @@ class Provedores {
   }
 
   modeloValido(id, modelo) {
+    id = normalizarId(id);
     if (!modelo) return true;
-    return ADAPTADORES[id].modelos().some(m => m.id === modelo) || MODELO_LIVRE.test(modelo);
+    return ADAPTADORES[id]?.modelos().some(m => m.id === modelo) || MODELO_LIVRE.test(modelo);
   }
 
   nomeModelo(id, modelo) {
+    id = normalizarId(id);
     const a = ADAPTADORES[id] || ADAPTADORES.claude;
     return a.modelos().find(m => m.id === (modelo || ''))?.nome || modelo || 'padrão';
   }
 
   /** Chave de API para injetar na janela (só no modo chave). */
   async chaveParaJanela(id) {
+    id = normalizarId(id);
     if (!ADAPTADORES[id]?.chave || this.modoConta(id) !== 'chave') return null;
-    return this.cofre.ler(id);
+    return (await this.cofre.ler(id)) || (id === 'antigravity' ? await this.cofre.ler('gemini') : null);
   }
 
   async guardarChave(id, chave) {
+    id = normalizarId(id);
     const a = ADAPTADORES[id];
     if (!a?.chave) throw new Error('este provedor não usa chave de API pelo Engram');
     chave = String(chave || '').trim();
@@ -359,11 +443,14 @@ class Provedores {
   }
 
   async esquecerChave(id) {
+    id = normalizarId(id);
     await this.cofre.apagar(id);
+    if (id === 'antigravity') await this.cofre.apagar('gemini').catch(() => {});
     this.mudarModo(id, 'conta');
   }
 
   mudarModo(id, modo) {
+    id = normalizarId(id);
     const contas = { ...(this.cfg.contas || {}), [id]: { ...((this.cfg.contas || {})[id] || {}), modo } };
     this.cfg.contas = contas;
     this.salvarConfig({ contas });
@@ -372,6 +459,7 @@ class Provedores {
 
   /** O comando (para um terminal do Engram) que faz login, logout ou instala. */
   comandoDe(id, acao) {
+    id = normalizarId(id);
     const a = ADAPTADORES[id];
     if (!a) throw new Error('provedor desconhecido');
     if (acao === 'instalar') {

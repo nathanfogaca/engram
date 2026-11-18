@@ -86,17 +86,19 @@ class FontePasta {
   }
 
   observar(aoMudar) {
-    let timer = null;
     try {
       this.vigia = fs.watch(this.pasta, { recursive: true }, () => {
-        clearTimeout(timer);
-        timer = setTimeout(aoMudar, 800);
+        clearTimeout(this.timer);
+        this.timer = setTimeout(aoMudar, 800);
       });
+      this.vigia.on('error', () => {});
     } catch { /* sem vigia: a sincronização periódica cobre */ }
   }
 
   /** Para de vigiar a pasta (a pessoa trocou o cérebro para outra fonte). */
   parar() {
+    clearTimeout(this.timer);
+    this.timer = null;
     try { this.vigia?.close(); } catch { /* já fechado */ }
     this.vigia = null;
   }

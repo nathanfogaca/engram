@@ -47,6 +47,12 @@ class Cerebro {
     const locais = new Map(this.q('SELECT caminho, modificado FROM notas').all().map(r => [r.caminho, r.modificado]));
     let novas = 0, alteradas = 0;
     const erros = [];
+    const removidas = [...locais.keys()].filter(rel => !remotos.has(rel));
+    if (removidas.length) {
+      transacao(this.db, () => {
+        for (const rel of removidas) this.apagarNota(rel);
+      });
+    }
     // o que precisa ser lido; leitura longa (o servidor lê uma nota por chamada, com limite por minuto) avisa o
     // progresso de tempos em tempos, para a constelação ir crescendo em vez de ficar vazia até o fim
     const aLer = [...remotos.entries()].sort().filter(([rel, assinatura]) => forcar || locais.get(rel) !== assinatura);
@@ -71,11 +77,7 @@ class Cerebro {
       }
     }
     if (this.fonte !== fonte) return cancelada();
-    const removidas = [...locais.keys()].filter(rel => !remotos.has(rel));
-    transacao(this.db, () => {
-      for (const rel of removidas) this.apagarNota(rel);
-      this.q("INSERT OR REPLACE INTO estado VALUES ('ultima_sincronizacao', ?)").run(agora());
-    });
+    this.q("INSERT OR REPLACE INTO estado VALUES ('ultima_sincronizacao', ?)").run(agora());
     return { novas, alteradas, removidas: removidas.length, total: remotos.size, erros, forcada: !!forcar, segundos: Math.round((Date.now() - inicio) / 100) / 10 };
   }
 
@@ -84,7 +86,11 @@ class Cerebro {
     try {
       const texto = await fonte.ler(rel);
       if (this.fonte !== fonte) return null; // a fonte trocou enquanto lia: a nota era da outra
-      return this.gravarNota(interpretar(rel, texto), null);
+      let assinatura = null;
+      if (fonte.tipo === 'pasta' && fonte.pasta) {
+        try { assinatura = String(Math.floor(fs.statSync(path.join(fonte.pasta, rel)).mtimeMs)); } catch { /* segue */ }
+      }
+      return this.gravarNota(interpretar(rel, texto), assinatura);
     } catch (e) {
       return `${rel}: ${e.message}`;
     }

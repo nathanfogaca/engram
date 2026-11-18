@@ -91,11 +91,14 @@ class MotorCliente {
       // seguraria arquivos e portas do app, e a atualização não conseguiria trocar os arquivos.
       const aspas = s => `'${String(s).replace(/'/g, "''")}'`;
       const comando = `Start-Process -FilePath ${aspas(r.node)} -ArgumentList ${aspas(`"${r.motor}"`)} -WorkingDirectory ${aspas(r.cwd)} -WindowStyle Hidden`;
-      const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', comando], { env, windowsHide: true, stdio: 'ignore' });
+      const psExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      const ps = spawn(fs.existsSync(psExe) ? psExe : 'powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', comando], { env, windowsHide: true, stdio: 'ignore' });
+      ps.on('error', () => {});
       ps.unref();
       return;
     }
     const filho = spawn(r.node, [r.motor], { cwd: r.cwd, detached: true, stdio: 'ignore', env });
+    filho.on('error', () => {});
     filho.unref();
   }
 
