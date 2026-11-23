@@ -581,6 +581,40 @@ class Janelas {
     this.avisar({ tipo: 'evento', sessao_id: id, evento: 'Pergunta', estado: j.estado, pergunta, toques: [] });
   }
 
+  /**
+   * Claude Code 2.1.330 em diante: ao abrir, cada pasta do --add-dir pede confiança ("Adding a new directory"),
+   * com "No, exit" já marcado e a resposta valendo só para aquela sessão (volta em toda retomada). As pastas que
+   * o Engram passa são dele: a de arquivos do agente e o cérebro local que a pessoa escolheu. Para essas, ele
+   * mesmo desce até "Yes, add it", confere o marcador e só então dá Enter. Qualquer outra pasta continua sendo
+   * pergunta para a pessoa. Devolve true enquanto cuida da pergunta (o resto do vigia espera).
+   */
+  confiarPastaDoEngram(id, j) {
+    if (j.confiandoExtra && Date.now() - j.confiandoExtra < 1200) return true; // a tecla anterior ainda está chegando
+    const tela = j.tela.texto(30);
+    if (!/Adding a new directory:/i.test(tela) || !/worked here before/i.test(tela)) { j.confiandoExtra = 0; return false; }
+    const pasta = pastaDoPedido(tela);
+    if (!pasta || !this.pastaDoEngram(pasta)) return false;
+    const linhas = tela.split('\n');
+    const marcada = linhas.find(l => /^\s*[>❯›]\s+\S/.test(l)) || '';
+    const temSim = linhas.some(l => /^\s*[>❯›]?\s*Yes, add it\b/i.test(l));
+    if (!temSim) return false; // formato que não conheço: fica para a pessoa
+    j.confiandoExtra = Date.now();
+    if (/Yes, add it/i.test(marcada)) {
+      j.escrever('\r');
+      this.cerebro.registrarEvento(id, 'Pergunta', null, `pasta do Engram liberada sozinha: ${pasta}`);
+    } else {
+      j.escrever('\x1b[B'); // desce de "No, exit" para "Yes, add it"; na próxima volta confere o marcador e dá Enter
+    }
+    return true;
+  }
+
+  /** A pasta é uma das que o Engram passa ao agente no --add-dir (a de arquivos dele ou a do cérebro, como em pastasDoCerebro)? */
+  pastaDoEngram(pasta) {
+    const p = normalPasta(pasta);
+    const donas = [this.arquivos?.base, this.fonte?.tipo === 'pasta' ? this.fonte.pasta : null, this.cfg?.cerebro?.pasta].filter(Boolean).map(normalPasta);
+    return donas.some(d => p === d || p.startsWith(`${d}\\`));
+  }
+
   /** Responde "sim, confio nesta pasta" na pergunta do Claude (só se ela ainda estiver na tela). */
   confiarPasta(id) {
     const j = this.ativas.get(id);
@@ -755,8 +789,12 @@ class Janelas {
   vigiar() {
     for (const [id, j] of this.ativas) {
       const a = this.provedores.adaptador(j.provedor) || {};
-      if (a.ganchos) { this.verificarPergunta(id, j); this.conferirEntrega(id, j); } else this.estadoPelaTela(id, j, a);
-      try { this.olharPergunta(id, j, a); } catch { /* tela estranha: fica para a próxima volta */ }
+      let cuidando = false; // a pergunta de confiança numa pasta do próprio Engram: ele mesmo responde
+      try { cuidando = j.provedor === 'claude' && this.confiarPastaDoEngram(id, j); } catch { /* segue como pergunta normal */ }
+      if (!cuidando) {
+        if (a.ganchos) { this.verificarPergunta(id, j); this.conferirEntrega(id, j); } else this.estadoPelaTela(id, j, a);
+        try { this.olharPergunta(id, j, a); } catch { /* tela estranha: fica para a próxima volta */ }
+      }
       if (!j.conversa) j.conversa = this.acharConversa(id, j);
       else if (j.conversa.endsWith('.zst')) {
         // conversa compactada pelo Codex: se ele voltar a escrever, passa a valer a aberta (.jsonl)
@@ -1806,6 +1844,19 @@ function haQuanto(ms) {
 function assunto(texto, max = 160) {
   const t = String(texto || '').replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+/** O caminho que a pergunta "Adding a new directory:" mostra (o terminal pode quebrá-lo em mais de uma linha). */
+function pastaDoPedido(tela) {
+  const m = /Adding a new directory:\s*([\s\S]*?)\s*This session hasn/i.exec(String(tela || ''));
+  return m ? m[1].split('\n').map(l => l.trim()).join('') : null;
+}
+
+/** Caminho para comparar: sem espaço de quebra, com \, sem barra no fim, minúsculo e com ~ trocado pela pasta do usuário. */
+function normalPasta(p) {
+  let s = String(p || '').replace(/^~(?=[\\/]|$)/, require('node:os').homedir());
+  s = s.replace(/\s+/g, '').replace(/\//g, '\\').replace(/\\+$/, '');
+  return s.toLowerCase();
 }
 
 /** Número de palco válido (1 a PALCOS) ou null. */
