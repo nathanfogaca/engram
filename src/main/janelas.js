@@ -21,7 +21,7 @@ const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
 const { lerPergunta, TECLAS, TRABALHANDO } = require('./pergunta');
 const { notasDoComando, analisarCodex, resolver, trechosDoPatch, desescapar } = require('./notas-tocadas'); // linhas do cérebro e bolha do palco
 const OCUPADO_ESTADO = new Set(['pensando', 'trabalhando']);
-const FERRAMENTAS_TIME = ['equipe', 'palco', 'tarefas', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar', 'ajustes', 'ajustar'];
+const FERRAMENTAS_TIME = ['equipe', 'palco', 'tarefas', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar', 'ajustes', 'ajustar', 'pedir_segredo'];
 // as cores dos setores, as mesmas da tela (src/tela/js/setores.js)
 const CORES_SETOR = { violeta: '#8b7bff', ciano: '#38d6f5', magenta: '#e879f9', ambar: '#ffc857', verde: '#4ade9f', coral: '#ff7a6b' };
 const PESSOA = 'pessoa'; // remetente das mensagens que a pessoa digita na vista Conversa
@@ -1559,6 +1559,14 @@ class Janelas {
     return `[Engram · mensagem de ${r.nome} (${r.papel}, ${r.modelo})]\n${texto}${doSetor}\n\n(${dica})`;
   }
 
+  /** Recado do próprio Engram para um agente (ex.: a resposta que chegou depois que a ferramenta já tinha voltado). */
+  recadoDoEngram(id, texto) {
+    const j = this.ativas.get(id);
+    if (!j) return false;
+    this.enfileirar(j, PESSOA, texto, `[Engram · aviso do próprio Engram, não da pessoa]\n${texto}`);
+    return true;
+  }
+
   /** Põe a mensagem na caixa do agente. `info` (opcional) recebe o número dela (info.n), para o quadro de tarefas. */
   enfileirar(j, de, texto, formatado = null, info = null) {
     const n = this.cerebro.mensagemRegistrar(de, j.id, texto);
@@ -1649,6 +1657,9 @@ class Janelas {
     else if (['UserPromptSubmit', 'PreToolUse', 'PostToolUse'].includes(evento)) j.ocupadoAte = Date.now() + 30_000;
     const ferramenta = dados.ferramenta || null;
     const entrada = dados.entrada && typeof dados.entrada === 'object' ? dados.entrada : {};
+    // arquivo com segredo que a pessoa preencheu (pedir_segredo): o gancho do Claude Code barra a ferramenta
+    let negar = null;
+    if (evento === 'PreToolUse') try { negar = this.segredos?.bloqueio(ferramenta, entrada, j.pasta) || null; } catch { /* nunca trava o agente */ }
     let estado = ESTADO_POR_EVENTO[evento] || null;
     if (evento === 'Notification' && !pedePermissao(dados)) {
       // "parado há um tempo": o agente espera entrada; não trava a caixa e ainda destrava entrega
@@ -1666,13 +1677,14 @@ class Janelas {
     } else if (estado && j.pergunta?.tipo === 'terminal') {
       j.pergunta = null; j.perguntaAssinatura = null; semPergunta = null; // o agente seguiu: a pergunta sai da Conversa
     }
-    const resumo = resumoEvento(evento, ferramenta, entrada, String(dados.mensagem || ''));
+    const resumo = negar ? `barrado: mexer num arquivo com segredos (${ferramenta})` : resumoEvento(evento, ferramenta, entrada, String(dados.mensagem || ''));
     if (['UserPromptSubmit', 'PreToolUse', 'Stop', 'Notification', 'SessionStart'].includes(evento)) this.cerebro.registrarEvento(id, evento, ferramenta, resumo);
     const toques = evento === 'PostToolUse' ? this.registrarToques(id, this.toques(ferramenta, entrada, j.pasta)) : [];
     this.avisar({ tipo: 'evento', sessao_id: id, evento, estado, ferramenta, resumo, toques: toques.map(([d, t]) => ({ destino: d, tipo: t })), ...(semPergunta === null ? { pergunta: null } : {}) });
     try { this.aoEvento?.(id, evento, ferramenta, entrada); } catch { /* quem acompanha não atrapalha o agente */ }
     if (evento === 'SessionStart') this.tentarEntregar(j, 2000); // a tela do agente ainda está montando
     else if (evento === 'Stop' || evento === 'Notification') this.tentarEntregar(j, 600);
+    return negar ? { negar } : null;
   }
 
   /**

@@ -3,6 +3,7 @@
 const { posicaoValida, palcoValido } = require('./janelas');
 const { PALCOS } = require('./banco');
 const { AjustesDoAgente } = require('./ajustes-agente');
+const { Segredos } = require('./segredos');
 
 class ErroRota extends Error {
   constructor(status, mensagem) { super(mensagem); this.status = status; }
@@ -259,6 +260,10 @@ function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, prove
   janelas.ajustes = new AjustesDoAgente({ cfg, mcps, trocaCerebro, janelas, avisar: m => janelas.avisar(m), salvarConfig, mudouMcps, versao });
   rota('GET', '/api/ajustes/pedido', () => janelas.ajustes.pendente());
   rota('POST', '/api/ajustes/pedido/:id', erro400(async (p, b) => janelas.ajustes.responder(p.id, b.aceitar === true)));
+  // segredos que a pessoa digita (ferramenta pedir_segredo): o valor vai da tela direto para o .env, nunca ao agente
+  janelas.segredos = new Segredos({ cfg, cerebro, janelas, avisar: m => janelas.avisar(m) });
+  rota('GET', '/api/segredos/pedido', () => janelas.segredos.pendente());
+  rota('POST', '/api/segredos/pedido/:id', erro400(async (p, b) => janelas.segredos.responder(p.id, b.aceitar === true, b.valores)));
   rota('GET', '/api/mcps', () => mcps.listar());
   rota('GET', '/api/mcps/encontrados', erro400(() => mcps.encontrados()));
   rota('POST', '/api/mcps', erro400(async (_, b) => { await mcps.salvar(b.def || {}, b.segredos || {}, b.id_antigo || null); return mudouMcps(); }));

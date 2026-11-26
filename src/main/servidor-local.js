@@ -30,8 +30,9 @@ function criarServidorLocal({ cfg, token, janelas, mcp, registrar }) {
       let corpo;
       try { corpo = JSON.parse(bruto || '{}'); } catch { return responder(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'JSON inválido' } }); }
       if (req.url === '/eventos') {
-        try { janelas.evento(corpo); } catch (e) { registrar(`evento: ${e.message}`); }
-        return responder(res, 200, { ok: true });
+        let r = null;
+        try { r = janelas.evento(corpo); } catch (e) { registrar(`evento: ${e.message}`); }
+        return responder(res, 200, r?.negar ? { ok: true, negar: r.negar } : { ok: true }); // negar: o gancho barra a ferramenta
       }
       const sessao = String(req.headers['x-engram-sessao'] || '');
       try {

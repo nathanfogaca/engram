@@ -93,6 +93,17 @@ function ferramentas(janelas) {
           pensamento_no_palco: { type: 'boolean' }, atualizar_sozinho: { type: 'boolean' },
         }, additionalProperties: false },
       }, ['motivo']) },
+    { name: 'pedir_segredo', description: 'Pede à pessoa valores que vão para um arquivo .env (chave de API, senha, usuário, token, string de conexão) sem que eles passem por você: aparece uma janela no Engram com um campo para cada variável, ela preenche e o Engram grava direto no arquivo. Você recebe só os nomes gravados, nunca os valores. Use sempre que o trabalho precisar de segredo: nunca peça para a pessoa colar segredo na conversa nem escreva segredo em arquivo. Depois disso o arquivo fica protegido: não leia, não mostre e não grave nele por conta própria (o Engram barra) e não imprima as variáveis; use-as pelo nome no código. Para mudar ou acrescentar variável nele, peça de novo por aqui. A resposta volta em até ~50 s; se a pessoa demorar, o resultado chega depois como mensagem.',
+      inputSchema: objeto({
+        motivo: { type: 'string', description: 'para que servem os valores, em uma ou duas frases (a pessoa lê na tela)' },
+        arquivo: { type: 'string', description: 'o arquivo .env (ex.: .env, .env.local), relativo à sua pasta ou caminho inteiro; padrão: .env na sua pasta' },
+        campos: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: {
+          nome: { type: 'string', description: 'nome da variável, ex.: OPENAI_API_KEY' },
+          descricao: { type: 'string', description: 'o que é e onde a pessoa acha, ex.: "chave da API, em platform.openai.com > API keys"' },
+          secreto: { type: 'boolean', description: 'padrão true (campo escondido). false para o que não é segredo, como porta ou nome do banco: aí o valor volta para você' },
+          valor: { type: 'string', description: 'sugestão já preenchida, só para campo com secreto=false' },
+        }, required: ['nome'], additionalProperties: false } },
+      }, ['motivo', 'campos']) },
   ];
 }
 
@@ -134,6 +145,7 @@ async function tratar(janelas, sessao, m) {
         case 'remover_setor': return ok(texto(janelas.removerSetor(sessao, a)));
         case 'ajustes': return ok(texto(janelas.ajustes ? JSON.stringify(janelas.ajustes.ver(), null, 2) : 'Os ajustes ainda não estão disponíveis: o Engram está abrindo.'));
         case 'ajustar': return ok(texto(janelas.ajustes ? await janelas.ajustes.pedir(sessao, a) : 'Os ajustes ainda não estão disponíveis: o Engram está abrindo.'));
+        case 'pedir_segredo': return ok(texto(janelas.segredos ? await janelas.segredos.pedir(sessao, a) : 'Os pedidos de segredo ainda não estão disponíveis: o Engram está abrindo.'));
         default: return { jsonrpc: '2.0', id: m.id, error: { code: -32602, message: `ferramenta desconhecida: ${p.name}` } };
       }
     } catch (e) {

@@ -1,7 +1,8 @@
 // Gancho dos agentes: o CLI chama este script a cada evento (início, pedido, ferramenta, fim de turno)
 // com um JSON na entrada. Ele manda um resumo curto para o Engram, que desenha o estado e as linhas.
 // O Codex chama o mesmo script pelo "notify", com o JSON como último argumento (fim de turno).
-// Regras: nunca falha (sai sempre com 0, sem saída na tela) e nunca manda conteúdo, só o alvo.
+// Regras: nunca falha (sai sempre com 0) e nunca manda conteúdo, só o alvo. A única saída é a de barrar
+// (PreToolUse do Claude Code) quando o Engram pede: ferramenta mexendo num arquivo com segredo da pessoa.
 
 const http = require('node:http');
 
@@ -30,13 +31,26 @@ function curto(entrada) {
 
 const { ENGRAM_URL: url, ENGRAM_TOKEN: token, ENGRAM_SESSAO: sessao } = process.env;
 
-function mandar(corpo) {
+// barrar = true só no PreToolUse do Claude Code: se o Engram responder "negar" (arquivo com segredo que a
+// pessoa preencheu), a ferramenta não roda e o agente lê o motivo. Qualquer erro aqui deixa passar.
+function mandar(corpo, barrar = false) {
   try {
     corpo = JSON.stringify(corpo);
     const req = http.request(`${url.replace(/\/$/, '')}/eventos`, {
       method: 'POST', timeout: 2000,
       headers: { 'Content-Type': 'application/json', 'X-Engram-Token': token, 'Content-Length': Buffer.byteLength(corpo) },
-    }, res => { res.resume(); res.on('end', () => process.exit(0)); });
+    }, res => {
+      let resposta = '';
+      res.setEncoding('utf8');
+      res.on('data', c => { if (resposta.length < 20000) resposta += c; });
+      res.on('end', () => {
+        let negar = null;
+        if (barrar) try { negar = JSON.parse(resposta).negar || null; } catch { /* deixa passar */ }
+        if (!negar) process.exit(0);
+        const saida = { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: String(negar).slice(0, 1000) } };
+        try { process.stdout.write(JSON.stringify(saida) + '\n', () => process.exit(0)); } catch { process.exit(0); }
+      });
+    });
     req.on('error', () => process.exit(0));
     req.on('timeout', () => { req.destroy(); process.exit(0); });
     req.end(corpo);
@@ -74,7 +88,7 @@ if (process.argv.length > 2 && ultimo.trim().startsWith('{')) {
     mandar({
       sessao, evento, ferramenta, entrada: curto(entradaBruta), ...(externo ? { externo } : {}),
       mensagem: String(d.message || '').slice(0, 300), tipo_aviso: String(d.notification_type || '').slice(0, 60),
-    });
+    }, evento === 'PreToolUse' && d.hook_event_name === 'PreToolUse' && !d.hookEventName);
   });
 }
 setTimeout(() => process.exit(0), 4000);

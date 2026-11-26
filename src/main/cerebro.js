@@ -370,6 +370,8 @@ class Cerebro {
     return Number.isInteger(n) && n >= 1 && n <= PALCOS ? n : 1;
   }
   palcoAtualDefinir(n) { this.q("INSERT OR REPLACE INTO estado VALUES ('palco_atual', ?)").run(String(n)); }
+  estadoLer(chave) { return this.q('SELECT valor FROM estado WHERE chave = ?').get(chave)?.valor ?? null; }
+  estadoGravar(chave, valor) { this.q('INSERT OR REPLACE INTO estado VALUES (?, ?)').run(chave, String(valor)); }
   mensagemRegistrar(de, para, texto) { return Number(this.q('INSERT INTO mensagens (de, para, quando, texto) VALUES (?,?,?,?)').run(de, para, agora(), texto).lastInsertRowid); }
   mensagemEntregue(n) { this.q('UPDATE mensagens SET entregue = ? WHERE n = ?').run(agora(), n); }
   /** A última mensagem que chegou a este agente (a tarefa em que ele está, ou a última que fez). */
