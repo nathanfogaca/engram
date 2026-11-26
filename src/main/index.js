@@ -300,6 +300,11 @@ function criarJanela() {
     }
   });
   janela.on('closed', () => { janela = null; });
+  // O Windows avisa a janela (mesmo escondida na bandeja) antes de sair da conta ou desligar: os agentes que
+  // caírem a partir daí não foram fechados pela pessoa e voltam quando o Engram abrir de novo.
+  const sistemaSaindo = () => { if (nucleo?.janelas) nucleo.janelas.saindoDoSistemaEm = Date.now(); };
+  janela.on('query-session-end', sistemaSaindo);
+  janela.on('session-end', sistemaSaindo);
 }
 
 // janelas de "Visualizar trabalho": uma por agente, que dá para pôr em outro monitor

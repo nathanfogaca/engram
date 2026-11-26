@@ -310,6 +310,19 @@ export class Conversa {
       return null;
     }
     if (it.tipo === "marco") return el("div", { class: "conv-marco" }, el("span", { text: it.texto }));
+    if (it.tipo === "resumo") {
+      // o resumo da compactação: o agente recebeu, a pessoa não escreveu; fica fechado até ela pedir
+      const linha = el("div", { class: "conv-resumo" });
+      const botao = el("button", { class: "conv-resumo-ver", text: "▸ ver o resumo que o agente recebeu para continuar" });
+      botao.onclick = () => {
+        const aberta = linha.querySelector(".conv-resumo-txt");
+        if (aberta) { aberta.remove(); botao.textContent = "▸ ver o resumo que o agente recebeu para continuar"; return; }
+        botao.textContent = "▾ esconder o resumo";
+        linha.append(el("div", { class: "conv-detalhe conv-resumo-txt" }, markdown(it.texto)));
+      };
+      linha.append(botao);
+      return linha;
+    }
     return null;
   }
 

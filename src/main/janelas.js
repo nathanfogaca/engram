@@ -34,6 +34,9 @@ const MAX_ANEXOS = 20;
 const MONTAR_TELA = 3000; // depois do SessionStart (ou de confiar na pasta), quanto esperar antes de colar
 const CONFIRMAR = 8000; // sem UserPromptSubmit nesse tempo depois de colar, a entrega é conferida na tela
 const ONDE_MUDAR_LIMITE = 'Ajustes > Geral > Limites, "Janelas abertas ao mesmo tempo"';
+// janela que parou sem a pessoa fechar pelo Engram: espera isso antes de gravar "encerrada"; várias que
+// param com até JUNTAS_MS de diferença foram derrubadas juntas (o Windows saindo da conta), não fechadas
+const ESPERA_QUEDA = 5000, JUNTAS_MS = 3000;
 const COLAR_INICIO = '\x1b[200~', COLAR_FIM = '\x1b[201~';
 const VARIAVEIS_FORA = new Set(['CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_CODE_EXECPATH', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_CODE_SESSION_ATTENDED',
@@ -93,8 +96,10 @@ class Janelas {
     fs.mkdirSync(caminhos.janelas, { recursive: true });
     this.arquivoGanchos = path.join(caminhos.dados, 'ganchos.json');
     this.motor = new MotorCliente(cfg, token, {
-      aoSaida: (id, d) => this.motorSaida(id, d), aoFim: id => this.motorFim(id), aoCair: () => this.motorCaiu(), dados: caminhos.dados,
+      aoSaida: (id, d) => this.motorSaida(id, d), aoFim: (id, codigo) => this.motorFim(id, codigo), aoCair: () => this.motorCaiu(), dados: caminhos.dados,
     });
+    this.quedas = []; // janelas que pararam sem a pessoa fechar pelo Engram (para ver se pararam juntas)
+    this.saindoDoSistemaEm = 0; // o Windows avisou que vai sair da conta ou desligar (index.js)
     this.provedores = provedores;
     this.mcps = mcps;
     this.skills = skills;
@@ -420,7 +425,12 @@ class Janelas {
   }
 
   fechar(id) {
-    if (!this.ativas.has(id)) throw new Error('janela não está aberta');
+    if (!this.ativas.has(id)) {
+      // parou sozinha e ficou guardada para voltar no próximo início: a pessoa tirou do palco, então não volta
+      const s = this.cerebro.sessao(id);
+      if (s && !s.encerrada) { this.confirmarEncerrada(id); return; }
+      throw new Error('janela não está aberta');
+    }
     this.cerebro.sessaoManter(id, false); // foi a pessoa que encerrou: não reabre sozinho
     this.motor.mandar('fechar', { id });
   }
@@ -485,7 +495,7 @@ class Janelas {
     for (const cb of j.ouvintes) cb(texto);
   }
 
-  motorFim(id) {
+  motorFim(id, codigo = null) {
     const term = this.terminais.get(id);
     if (term) {
       this.terminais.delete(id);
@@ -514,16 +524,52 @@ class Janelas {
     this.motor.mandar('esquecer', { id });
     if (!j) return;
     j.viva = false;
-    if (Date.now() - j.criadaEm < 60_000) {
+    const s = this.cerebro.sessao(id);
+    const nome = s?.nome || 'a janela';
+    const pelaPessoa = !!s && !s.manter; // o × do Engram (fechar) tira o "manter" antes de mandar fechar
+    const cedo = Date.now() - j.criadaEm < 60_000;
+    if (cedo && !pelaPessoa && !this.sistemaSaindo()) {
       // fechou logo ao abrir: quase sempre é erro do CLI (opção, login, versão). Mostra o que ele disse.
       const disse = j.tela.texto(40).split('\n').map(l => l.trim()).filter(Boolean).slice(-6).join(' · ').slice(0, 400);
-      const nome = this.cerebro.sessao(id)?.nome || 'a janela';
       require('./config').registrar(`${nome} (${j.provedor}) fechou logo ao abrir: ${disse}`);
       this.avisar({ tipo: 'aviso', texto: `${nome} fechou logo ao abrir${disse ? `: ${disse.slice(0, 200)}` : ''}` });
     }
     const texto = '\r\n\x1b[2m[janela encerrada]\x1b[0m\r\n';
     j.guardar(texto);
     for (const cb of j.ouvintes) { cb(texto); cb(null); }
+    if (pelaPessoa) { this.confirmarEncerrada(id); return; }
+    // Parou sem a pessoa fechar pelo Engram: pode ser /exit no terminal, mas também o Windows saindo da
+    // conta ou desligando (ele derruba os agentes um a um e o Engram ainda vê alguns caírem). Só grava
+    // "encerrada" depois de um tempo, e nunca quando várias param juntas ou o Windows está saindo:
+    // nesses casos a janela continua aberta no banco e volta sozinha quando o Engram abrir de novo.
+    this.avisar({ tipo: 'sessao', sessao: this.info(id) }); // o cartão já mostra parado, com Retomar
+    const q = { id, nome, quando: Date.now(), codigo, cedo };
+    this.quedas = [...this.quedas.filter(o => q.quando - o.quando < 60_000), q];
+    setTimeout(() => this.decidirQueda(q), ESPERA_QUEDA);
+  }
+
+  sistemaSaindo() { return Date.now() - this.saindoDoSistemaEm < 3 * 60_000; }
+
+  /** Decide, uns segundos depois, se a janela que parou sozinha conta como encerrada pela pessoa. */
+  decidirQueda(q) {
+    q.decidida = true;
+    const s = this.cerebro.sessao(q.id);
+    if (!s || s.encerrada || this.ativas.has(q.id)) return; // já encerrada, ou a pessoa já retomou
+    const juntas = this.quedas.filter(o => Math.abs(o.quando - q.quando) <= JUNTAS_MS);
+    const tombo = !q.cedo && q.codigo !== null && q.codigo !== 0; // /exit sai com 0; morto à força, com outro código
+    if (!this.sistemaSaindo() && juntas.length < 2 && !tombo) { this.confirmarEncerrada(q.id); return; }
+    // não foi a pessoa: fica aberta no banco (volta no próximo início) e avisa uma vez por grupo
+    if (q.avisada) return;
+    for (const o of juntas) o.avisada = true;
+    const nomes = juntas.map(o => o.nome);
+    const lista = nomes.length > 4 ? `${nomes.slice(0, 4).join(', ')} e mais ${nomes.length - 4}` : nomes.join(', ');
+    const porque = this.sistemaSaindo() ? 'o Windows está saindo da conta ou desligando' : juntas.length > 1 ? 'pararam juntos, sem você fechar' : `parou sozinho (código ${q.codigo})`;
+    require('./config').registrar(`${lista}: ${porque}; continuam no time para reabrir (códigos: ${juntas.map(o => o.codigo ?? '?').join(', ')})`);
+    if (this.sistemaSaindo()) return;
+    this.avisar({ tipo: 'aviso', texto: `${lista} ${juntas.length > 1 ? 'pararam juntos' : 'parou'} sem você fechar. A conversa ficou salva: clique em Retomar no cartão, ou ${juntas.length > 1 ? 'eles voltam' : 'ele volta'} sozinho${juntas.length > 1 ? 's' : ''} quando o Engram abrir de novo.` });
+  }
+
+  confirmarEncerrada(id) {
     this.cerebro.sessaoEncerrar(id); // saiu com o app rodando (/exit, ×): conta como encerrada
     // a posição dela fica (dá para retomar pela gaveta); a de quem saiu do histórico, não
     try { this.cerebro.posicoesLimpar(); } catch { /* fica para a próxima */ }

@@ -53,11 +53,12 @@ function comando(sock, m) {
     const novo = { pty: p, saida: [], tamanho: 0, viva: true, fimEm: null };
     terminais.set(id, novo);
     p.onData(d => { guardar(novo, d); espalhar({ ev: 'saida', id, dados: d }); });
-    p.onExit(() => {
+    p.onExit(e => {
       novo.viva = false;
       novo.fimEm = Date.now();
-      registrar(`terminou ${id}`);
-      espalhar({ ev: 'fim', id });
+      const codigo = Number.isInteger(e?.exitCode) ? e.exitCode : null;
+      registrar(`terminou ${id}${codigo === null ? '' : ` (código ${codigo})`}`);
+      espalhar({ ev: 'fim', id, codigo });
     });
     registrar(`abriu ${id}`);
     return mandar(sock, { ev: 'ok', ref, pid: p.pid });

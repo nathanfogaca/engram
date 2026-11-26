@@ -13,6 +13,8 @@ const COMANDO = /<(command-name|command-message|command-args|local-command-stdou
 const ENGRAM = /\[Engram\s*·?\s*mensagem de (.+?) \(([^,()]+), ([^()]+)\)\]\s*/;
 const RESPONDER = /\s*\(Para responder, use mcp__engram__enviar com para="[^"]*"\.\)\s*$/;
 const ID = /^[0-9a-f-]{36}$/;
+// o resumo que o Claude Code grava quando a conversa enche (versões antigas não marcam isCompactSummary)
+const RESUMO = /^\s*This session is being continued from a previous conversation/;
 
 function achar(sessao) {
   if (!ID.test(sessao || '')) return null;
@@ -68,6 +70,9 @@ function itensDe(d) {
   const quando = d.timestamp;
   const conteudo = d.message?.content;
   if (d.type === 'user') {
+    // o resumo da compactação vem como mensagem "do usuário", mas ninguém digitou: não vira balão da pessoa
+    const bruto = typeof conteudo === 'string' ? conteudo : (conteudo || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n');
+    if (d.isCompactSummary || RESUMO.test(bruto)) return [{ tipo: 'resumo', texto: bruto.replace(LEMBRETE, '').trim().slice(0, 60000), quando }];
     if (typeof conteudo === 'string') return textoUsuario(conteudo, quando);
     const saida = [];
     for (const b of conteudo || []) {

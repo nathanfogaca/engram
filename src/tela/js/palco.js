@@ -564,7 +564,7 @@ ${NOTA_CUSTO}`;
       el("div", { class: "discreto", text: "Janela encerrada. A conversa ficou salva." }),
       el("div", { class: "linha" },
         el("button", { class: "btn-brilho pequeno", onclick: () => this.aoRetomar(c.info) }, el("span", { text: "Retomar" })),
-        el("button", { class: "btn pequeno", onclick: () => this.remover(id), text: "Tirar do palco" })));
+        el("button", { class: "btn pequeno", onclick: () => this.tirar(id), text: "Tirar do palco" })));
     c.el.append(c.elFim);
   }
 
@@ -608,8 +608,14 @@ ${NOTA_CUSTO}`;
     }
   }
 
+  /** A pessoa tirou do palco um cartão parado: se ele tinha ficado guardado para voltar sozinho, não volta mais. */
+  tirar(id) {
+    api(`/api/sessoes/${id}/encerrar`, { method: "POST" }).catch(() => { /* já estava encerrada */ });
+    this.remover(id);
+  }
+
   async encerrar(c) {
-    if (!c.viva) { this.remover(c.id); return; }
+    if (!c.viva) { this.tirar(c.id); return; }
     if (!confirm(`Encerrar “${c.info.nome}”? A conversa fica salva e dá para retomar.`)) return;
     try { await api(`/api/sessoes/${c.id}/encerrar`, { method: "POST" }); }
     catch (e) { avisar({ texto: e.message, cor: "#ff6b7d" }); }

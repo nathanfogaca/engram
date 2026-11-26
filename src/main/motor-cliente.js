@@ -113,7 +113,7 @@ class MotorCliente {
         let m;
         try { m = JSON.parse(linha); } catch { continue; }
         if (m.ev === 'saida') this.aoSaida(m.id, m.dados);
-        else if (m.ev === 'fim') this.aoFim(m.id);
+        else if (m.ev === 'fim') this.aoFim(m.id, Number.isInteger(m.codigo) ? m.codigo : null); // motor antigo não manda o código
         else {
           const p = this.esperando.get(m.ref);
           if (p) { this.esperando.delete(m.ref); m.ev === 'erro' ? p.reject(new MotorErro(m.erro)) : p.resolve(m); }
