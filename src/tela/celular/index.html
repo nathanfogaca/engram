@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="pt-BR" data-tema="aurora">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#04060a">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Engram">
+<meta name="referrer" content="no-referrer">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="engram.png">
+<link rel="apple-touch-icon" href="engram.png">
+<link rel="stylesheet" href="app.css">
+<title>Engram</title>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<section id="parear" class="parear" hidden>
+  <div class="parear-cartao">
+    <div class="logo-grande"><img src="engram.png" alt=""></div>
+    <h1>Engram</h1>
+    <p class="sub">Conecte ao Engram do seu PC</p>
+    <form id="form-parear" autocomplete="off">
+      <label for="codigo">Código de pareamento</label>
+      <input id="codigo" inputmode="text" autocapitalize="characters" autocomplete="one-time-code" spellcheck="false" maxlength="9" placeholder="XXXX-XXXX" required>
+      <label for="aparelho">Nome deste aparelho</label>
+      <input id="aparelho" maxlength="40" spellcheck="false">
+      <button id="btn-parear" class="brilho" type="submit"><span>Conectar</span></button>
+      <p id="parear-erro" class="erro" role="alert"></p>
+    </form>
+    <p class="dica">No PC, abra <b>Ajustes › Celular</b>: aponte a câmera para o QR code ou digite o código daqui.</p>
+  </div>
+</section>
+
+<main id="app" class="app" hidden>
+  <header class="topo">
+    <img class="logo-mini" src="engram.png" alt="">
+    <div class="titulo"><b>Engram</b><small id="pc">conectando…</small></div>
+    <span id="vivo" class="vivo" title="conectando"></span>
+  </header>
+  <nav class="abas" id="abas" role="tablist">
+    <span class="abas-luz" id="abas-luz" aria-hidden="true"></span>
+    <button type="button" role="tab" data-aba="conversa" class="on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>Conversa</button>
+    <button type="button" role="tab" data-aba="palco"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="3"/><circle cx="18" cy="7" r="3"/><circle cx="12" cy="18" r="3"/><path d="M8.5 8.5 10.5 15.5M15.5 8.5 13.5 15.5M9 7h6"/></svg>Palco<em id="selo-palco" hidden></em></button>
+    <button type="button" role="tab" data-aba="entregas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>Entregas<em id="selo-entregas" hidden></em></button>
+  </nav>
+
+  <section class="vista" id="v-conversa">
+    <button id="alvo" class="alvo" type="button" aria-label="Escolher com quem falar"></button>
+    <div id="conversa" class="conversa">
+      <div id="itens"></div>
+      <div id="fila"></div>
+    </div>
+    <button id="novas" class="novas" type="button" hidden>↓ novas mensagens</button>
+    <div id="pergunta" class="pergunta" hidden></div>
+    <div id="situacao" class="situacao" hidden></div>
+    <form id="compor" class="compor">
+      <textarea id="texto" rows="1" placeholder="Peça algo ao maestro…" enterkeyhint="send"></textarea>
+      <button id="enviar" type="submit" aria-label="Enviar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.4 20.4 21 12 3.4 3.6l.1 6.5L15 12l-11.5 1.9z"/></svg></button>
+    </form>
+  </section>
+
+  <section class="vista rola" id="v-palco" hidden>
+    <div class="palco-abas" id="palco-abas"></div>
+    <div class="mapa" id="mapa"></div>
+    <h2 class="secao">Time <small id="time-resumo"></small></h2>
+    <div class="time-lista" id="time-lista"></div>
+    <button id="sair" class="sair" type="button">Desconectar este aparelho</button>
+  </section>
+
+  <section class="vista rola" id="v-entregas" hidden>
+    <div class="entregas" id="entregas"></div>
+  </section>
+</main>
+
+<section id="visor" class="visor" hidden>
+  <header class="visor-topo">
+    <button type="button" class="visor-voltar" id="visor-voltar" aria-label="Voltar">‹</button>
+    <div class="visor-nome"><b id="visor-nome"></b><small id="visor-de"></small></div>
+    <a id="visor-fora" class="visor-fora" target="_blank" rel="noopener noreferrer">Abrir fora</a>
+  </header>
+  <div class="visor-corpo" id="visor-corpo"></div>
+</section>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="markdown-it.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

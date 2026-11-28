@@ -390,6 +390,7 @@ class JanelaTrabalho {
       $("#trab-agora").textContent = resumo || ferramenta;
     } else if (evento === "UserPromptSubmit") this.adicionarTempo({ icone: "mail", texto: "Recebeu um pedido", quando });
     else if (evento === "Stop") { this.adicionarTempo({ icone: "pass", texto: "Terminou o turno", quando }); $("#trab-agora").textContent = "Terminou: esperando o próximo pedido"; }
+    else if (evento === "Interrompido") { this.adicionarTempo({ icone: "debug-stop", texto: "Turno interrompido", quando }); $("#trab-agora").textContent = "Parou: esperando o próximo pedido"; }
   }
 
   aoVivo(m) {

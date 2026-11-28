@@ -1,0 +1,10 @@
+{
+  "name": "Engram",
+  "short_name": "Engram",
+  "description": "Mande pedidos ao time do Engram pelo celular",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#04060a",
+  "theme_color": "#04060a",
+  "icons": [{ "src": "engram.png", "sizes": "256x256", "type": "image/png", "purpose": "any" }]
+}

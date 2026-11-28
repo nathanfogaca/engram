@@ -166,6 +166,7 @@ Aurora, Oceano, Brasa, Grafite, Claro e Alto contraste. Troca na hora.
 - **Fluxos**: o projeto mapeado em blocos, aceso enquanto o time trabalha.
 - **Conversa legível**: o cartão mostra a conversa em texto, sem gastar token, com leitor grande e arquivos por agente.
 - **MCPs, skills e contas**: tudo pela tela, com segredos no cofre do Windows.
+- **Celular (modo dispatch)**: o app do Engram no celular, pareado por QR code. Mande pedidos ao maestro, acompanhe o time, responda as perguntas e aperte Parar, no mesmo Wi-Fi.
 
 ## Para desenvolver
 

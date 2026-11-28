@@ -93,7 +93,7 @@ export class Conversa {
     this.btnEnviar.onclick = () => this.enviar();
     this.btnClipe.onclick = () => this.seletor.click();
     this.seletor.onchange = () => { this.mandarArquivos([...this.seletor.files]); this.seletor.value = ""; };
-    this.btnParar.onclick = () => api(`/api/sessoes/${this.id}/interromper`, { method: "POST" }).catch(() => {});
+    this.btnParar.onclick = () => this.parar();
     this.rolo.addEventListener("wheel", e => e.stopPropagation(), { passive: true });
     this.instalarSoltar(this.el);
     this.atualizarArquivos();
@@ -394,12 +394,23 @@ export class Conversa {
     this.entrada.focus();
   }
 
+  /** Parar: o Esc vai na hora; o estado só muda quando a tela do agente mostra que ele parou (um instante). */
+  parar() {
+    this.parandoAte = Date.now() + 15_000;
+    this.btnParar.disabled = true;
+    this.txtDigitando.textContent = "parando";
+    api(`/api/sessoes/${this.id}/interromper`, { method: "POST" }).catch(() => {});
+  }
+
   estado(estado) {
     const ocupado = OCUPADO.has(estado);
     this.ocupado = ocupado;
     this.digitando.hidden = !ocupado;
     this.btnParar.hidden = !ocupado;
-    this.txtDigitando.textContent = estado === "trabalhando" ? "trabalhando" : estado === "iniciando" ? "iniciando" : "pensando";
+    const parando = ocupado && Date.now() < (this.parandoAte || 0);
+    if (!parando) this.parandoAte = 0;
+    this.btnParar.disabled = parando;
+    this.txtDigitando.textContent = parando ? "parando" : estado === "trabalhando" ? "trabalhando" : estado === "iniciando" ? "iniciando" : "pensando";
     if (!this.perguntaAtual) {
       this.montarAviso("Está pedindo a sua permissão no terminal.", [["Responder no terminal", () => this.aoTerminal?.(), false]]);
       this.aviso.hidden = !ATENCAO.has(estado);

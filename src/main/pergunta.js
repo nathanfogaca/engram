@@ -85,4 +85,30 @@ function lerPergunta(tela, { linhas = 30 } = {}) {
 /** As teclas que a tela pode mandar ao terminal para responder (nada além disto passa). */
 const TECLAS = { enter: '\r', esc: '\x1b', cima: '\x1b[A', baixo: '\x1b[B', esquerda: '\x1b[D', direita: '\x1b[C', tab: '\t', espaco: ' ', sim: 'y', nao: 'n' };
 
-module.exports = { lerPergunta, TECLAS, RODAPE, TRABALHANDO };
+// a linha do spinner do Claude Code no meio de um turno: "✻ Nucleating… (3s · ↓ 278 tokens · thinking)"
+const GIRANDO = /^\s*\S\s+\S.*…\s*\(\d+\s*[smh]\b/;
+const REGUA = /^\s*─{10,}/;
+
+/** O CLI está no meio de um turno? O "esc to interrupt" do rodapé ou a linha do spinner, no fim da tela. */
+function trabalhandoNaTela(tela, linhas = 24) {
+  return String(tela || '').split('\n').slice(-linhas).some(l => TRABALHANDO.test(l) || GIRANDO.test(l));
+}
+
+/**
+ * O que está escrito na caixa de entrada do Claude Code: o texto entre as duas réguas (───) do fim da tela,
+ * depois do ❯. '' com a caixa vazia (ou só com a sugestão 'Try "..."'); null quando a caixa não está à vista
+ * (um diálogo no lugar dela).
+ */
+function caixaDeEntrada(tela) {
+  const ls = String(tela || '').split('\n');
+  let b = -1, a = -1;
+  for (let i = ls.length - 1; i >= Math.max(0, ls.length - 12) && b < 0; i--) if (REGUA.test(ls[i])) b = i;
+  for (let i = b - 1; i >= Math.max(0, b - 40) && a < 0; i--) if (REGUA.test(ls[i])) a = i;
+  if (a < 0) return null;
+  const dentro = ls.slice(a + 1, b);
+  if (!dentro.length || !/^\s*[❯>]/.test(dentro[0])) return null;
+  const texto = dentro.map((l, i) => (i ? l : l.replace(/^\s*[❯>]\s?/, '')).trimEnd()).join('\n').trim();
+  return /^Try "[^"\n]*"$/.test(texto) ? '' : texto;
+}
+
+module.exports = { lerPergunta, TECLAS, RODAPE, TRABALHANDO, trabalhandoNaTela, caixaDeEntrada };

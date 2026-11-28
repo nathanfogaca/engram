@@ -9,7 +9,7 @@ class ErroRota extends Error {
   constructor(status, mensagem) { super(mensagem); this.status = status; }
 }
 
-function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, abrirTrabalho }) {
+function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao, caminhos, salvarConfig, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, celular, abrirTrabalho }) {
   const importador = require('./importar');
   const rotas = [];
   const rota = (metodo, padrao, fn) => {
@@ -263,6 +263,11 @@ function criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, prove
   // segredos que a pessoa digita (ferramenta pedir_segredo): o valor vai da tela direto para o .env, nunca ao agente
   janelas.segredos = new Segredos({ cfg, cerebro, janelas, avisar: m => janelas.avisar(m) });
   rota('GET', '/api/segredos/pedido', () => janelas.segredos.pendente());
+  // modo dispatch: o app do Engram no celular, pela rede local (Ajustes > Celular)
+  rota('GET', '/api/celular', () => celular.estado());
+  rota('POST', '/api/celular', erro400(async (_, b) => celular.ligar(b.ligado === undefined ? undefined : b.ligado === true, b.ip === undefined ? undefined : String(b.ip || ''))));
+  rota('POST', '/api/celular/codigo', erro400(() => { exigir(celular.servidor, 400, 'ligue o celular primeiro'); return celular.novoCodigo(); }));
+  rota('POST', '/api/celular/aparelhos/:id/remover', erro400(p => celular.remover(p.id)));
   rota('POST', '/api/segredos/pedido/:id', erro400(async (p, b) => janelas.segredos.responder(p.id, b.aceitar === true, b.valores)));
   rota('GET', '/api/mcps', () => mcps.listar());
   rota('GET', '/api/mcps/encontrados', erro400(() => mcps.encontrados()));

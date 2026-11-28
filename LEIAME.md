@@ -26,6 +26,7 @@ tela (src/tela, servida em engram://app)  ──IPC──  processo principal (s
                                                      ├─ banco SQLite embutido (node:sqlite): cérebro e palco
                                                      ├─ fonte do cérebro: pasta local (padrão) ou servidor MCP
                                                      ├─ servidor 127.0.0.1:<porta> só para os AGENTES: MCP do time + ganchos
+                                                     ├─ servidor do celular 0.0.0.0:<porta+3> e arquivos :<porta+4> (só se ligado em Ajustes > Celular)
                                                      └─ cliente do motor (TCP local, com token)
 motor (src/motor/motor.js, Node puro, fora da pasta de instalação)
    └─ terminais dos agentes (node-pty)  ← fechar ou atualizar o app não derruba o time
@@ -202,6 +203,51 @@ A aba **Contas** mostra cada CLI de agente: se está instalado, a versão e o lo
     se ele começou a trabalhar.
 - **Caminho próprio de um CLI:** `executaveis` no `config.json` (ex.: `{ "codex": "D:\\ferramentas\\codex.exe" }`).
   Os atalhos `.cmd` do npm são lidos e viram `node <script>`.
+
+### Celular (modo dispatch)
+
+O app do Engram no celular, pela rede local. Do celular a pessoa:
+- conversa com o maestro ou com qualquer agente aberto, em qualquer palco;
+- vê o time ao vivo;
+- responde as perguntas do terminal com botões;
+- aperta Parar.
+
+Os pedidos entram na mesma fila da vista Conversa. No PC, a conversa mostra tudo igual.
+
+- **Ligar:** Ajustes > Celular. Vem desligado. Ligado, o Engram abre `0.0.0.0:<porta+3>` (8873 no
+  instalado; `celular_porta` no `config.json` troca). Volta ligado quando o app reabre.
+- **Parear:**
+  - O PC mostra um QR code (o link leva o código) e um código de 8 letras e números, que dá para
+    digitar.
+  - O código vale 10 minutos e uma vez só. Morre depois de 8 tentativas erradas.
+  - O celular troca o código por um token de 256 bits. Em `<dados>/celular.json` só fica o SHA-256
+    dele. Remover o aparelho na aba corta o acesso na hora.
+- **O que o servidor expõe:**
+  - As páginas de `src/tela/celular/`, por uma lista fixa de arquivos, com CSP `script-src 'self'`.
+  - Uma API mínima, `src/main/celular.js`: estado do time; conversa (leitura); pedido; Parar;
+    responder a pergunta; confiar na pasta. Nada de criar, fechar ou configurar.
+  - Pedido de outra origem é recusado. Depois de 20 tentativas sem token por minuto, o IP leva 429.
+  - Os avisos ao vivo saem por uma lista: estado, conversa mudou, fila da pessoa, arquivo
+    entregue. O texto das mensagens entre agentes não vai para o celular.
+- **Arquivos dos agentes no celular:**
+  - A aba Entregas lista a pasta `entregues` de cada agente aberto. O chat mostra um cartão para
+    o que foi entregue.
+  - O app pede um link (`POST /api/link`). O link vale 30 minutos para a pasta inteira daquele
+    agente, para o HTML achar o `.css` e as imagens do lado. Morre quando o aparelho é removido.
+  - O arquivo sai pela porta de arquivos, `<porta+4>` (8874 no instalado). É outra origem: o HTML
+    roda inteiro, com scripts e armazenamento próprio, sem enxergar o token do app.
+  - Essa porta só serve `/f/<link>/<nome>`, aceita Range (vídeo no iPhone) e dá CORS só para o app.
+  - Se ela não abrir, o arquivo sai pela porta do app, em sandbox sem a origem do app.
+- **Palco e rostos:** a aba Palco desenha o palco do PC em miniatura, com cartões, linhas,
+  revisão e setores, e pulsos quando uma mensagem passa. Cada agente tem um rosto gerado do id
+  (`src/tela/celular/avatar.js`), com o acessório do papel.
+- **Limites:**
+  - Só funciona no mesmo Wi-Fi, e o tráfego é HTTP sem cifra: use numa rede de confiança.
+  - Na primeira vez, o firewall do Windows pergunta se libera o Engram.
+  - Sem HTTPS não há notificação push. Com o app aberto, o celular vibra quando o agente termina ou
+    precisa da pessoa.
+- **Teste:** `ENGRAM_CELULAR_HOST=127.0.0.1` (só com `ENGRAM_DADOS`) abre a porta só neste PC, sem
+  mexer no firewall.
 
 ## Atualização automática
 

@@ -352,6 +352,7 @@ function tratar(m, repetido = false) {
   if (m.tipo === "tarefa") { quadro?.aoVivo(m); return; }
   if (m.tipo === "cena") { cenas?.aoVivo(m); return; }
   if (m.tipo === "uso") { cenas?.uso.aoVivo(m); return; }
+  if (m.tipo === "celular") { ajustes?.celular.aoVivo(m); return; } // modo dispatch: pareou, conectou, saiu
   if (palcos && !palcos.vale(m)) {
     // sessão, setor, automação, post-it, linha ou organização de outro palco: não se desenha (já contou e selou acima)
     if (m.tipo === "sessao") {

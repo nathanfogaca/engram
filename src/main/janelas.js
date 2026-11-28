@@ -18,7 +18,7 @@ const EVENTOS_GANCHO = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostT
 const ESTADO_POR_EVENTO = { SessionStart: 'pronta', UserPromptSubmit: 'pensando', PreToolUse: 'trabalhando', PostToolUse: 'pensando', Stop: 'esperando você', Notification: 'precisa de você' };
 const LIVRE = new Set(['pronta', 'esperando você']);
 const { PERGUNTA_GERAL: PERGUNTA_TELA } = require('./provedores');
-const { lerPergunta, TECLAS, TRABALHANDO } = require('./pergunta');
+const { lerPergunta, TECLAS, TRABALHANDO, trabalhandoNaTela, caixaDeEntrada } = require('./pergunta');
 const { notasDoComando, analisarCodex, resolver, trechosDoPatch, desescapar } = require('./notas-tocadas'); // linhas do cérebro e bolha do palco
 const OCUPADO_ESTADO = new Set(['pensando', 'trabalhando']);
 const FERRAMENTAS_TIME = ['equipe', 'palco', 'tarefas', 'enviar', 'ver_tela', 'criar_agente', 'ligar', 'desligar', 'organizar_palco', 'renomear', 'criar_setor', 'editar_setor', 'remover_setor', 'entregar_arquivo', 'fluxos', 'fluxo_desenhar', 'fluxo_marcar', 'ajustes', 'ajustar', 'pedir_segredo'];
@@ -33,6 +33,9 @@ const ETIQUETA_SETOR = 70; // a etiqueta com o nome do setor fica em cima da ár
 const MAX_ANEXOS = 20;
 const MONTAR_TELA = 3000; // depois do SessionStart (ou de confiar na pasta), quanto esperar antes de colar
 const CONFIRMAR = 8000; // sem UserPromptSubmit nesse tempo depois de colar, a entrega é conferida na tela
+// o Claude Code não avisa (Stop) o fim de um turno interrompido: parado na tela tanto tempo = acabou. Logo depois
+// de um Esc (botão Parar ou tecla no terminal) basta um instante; sem Esc nenhum, só bem mais tarde e sem gancho
+const PARADO_INTERROMPIDO = 1200, PARADO_SEM_GANCHO = 20_000, VALE_INTERRUPCAO = 120_000;
 const ONDE_MUDAR_LIMITE = 'Ajustes > Geral > Limites, "Janelas abertas ao mesmo tempo"';
 // janela que parou sem a pessoa fechar pelo Engram: espera isso antes de gravar "encerrada"; várias que
 // param com até JUNTAS_MS de diferença foram derrubadas juntas (o Windows saindo da conta), não fechadas
@@ -576,7 +579,13 @@ class Janelas {
     this.avisar({ tipo: 'sessao', sessao: this.info(id) });
   }
 
-  escrever(id, texto) { this.janela(id)?.escrever(texto); }
+  escrever(id, texto) {
+    const j = this.janela(id);
+    if (!j) return;
+    // Esc ou Ctrl+C digitado no terminal interrompe o turno como o botão Parar (e o Claude também não avisa o fim)
+    if ((texto === '\x1b' || texto === '\x03') && this.ativas.has(id)) this.marcarInterrupcao(j);
+    j.escrever(texto);
+  }
 
   redimensionar(id, colunas, linhas) {
     const j = this.janela(id);
@@ -607,7 +616,62 @@ class Janelas {
     return this.enfileirar(j, PESSOA, texto.slice(0, 20_000));
   }
 
-  interromper(id) { this.ativas.get(id)?.escrever('\x1b'); }
+  /**
+   * O botão Parar: um Esc no terminal. O Claude Code não dispara o Stop quando o turno é interrompido; quem
+   * percebe que ele parou é o conferirParada. Um Esc por clique duplo: Esc Esc com a caixa vazia abre o
+   * "voltar na conversa" do Claude.
+   */
+  interromper(id) {
+    const j = this.ativas.get(id);
+    if (!j || !j.viva) return;
+    const a = this.provedores.adaptador(j.provedor) || {};
+    const tela = j.tela.texto(40);
+    const trabalhando = a.ganchos ? trabalhandoNaTela(tela) : !a.ocupado || a.ocupado.test(tela.split('\n').slice(-14).join('\n'));
+    if (!trabalhando && !OCUPADO_ESTADO.has(j.estado)) return; // já está parado: não há o que interromper
+    const agora = Date.now();
+    if (agora - (j.escEm || 0) >= 1500) { j.escrever('\x1b'); j.escEm = agora; }
+    this.marcarInterrupcao(j);
+  }
+
+  marcarInterrupcao(j) {
+    if (!OCUPADO_ESTADO.has(j.estado)) return;
+    j.interrompidoEm = Date.now();
+    j.paradoDesde = 0;
+    j.ocupadoAte = 0; // agentes sem ganchos: o estado volta a sair da tela já
+    j.aguardando = null; // a mensagem que ia entrar foi interrompida de propósito: não entrega de novo
+  }
+
+  /**
+   * O Claude Code não dispara o Stop quando o turno é interrompido (Esc, Ctrl+C), e um Stop se perde se chega
+   * com o Engram fechado. Sem isso o agente ficaria "pensando" para sempre e a caixa de mensagens dele, parada.
+   * Turno acabado = nem "esc to interrupt" nem spinner na tela, com a caixa de entrada à vista: depois de uma
+   * interrupção, por um instante; sem ela, por PARADO_SEM_GANCHO e sem nenhum gancho nesse tempo.
+   */
+  conferirParada(id, j) {
+    const agora = Date.now();
+    if (!OCUPADO_ESTADO.has(j.estado)) { j.interrompidoEm = 0; j.paradoDesde = 0; return; }
+    if (j.aguardando || j.entregando) { j.paradoDesde = 0; return; } // a entrega em curso tem conferência própria
+    // logo depois de uma parada por interrupção, um gancho atrasado do pedido interrompido (UserPromptSubmit) pode
+    // pôr o estado de volta em "pensando": isso também conta como interrompido
+    const interrompeu = (!!j.interrompidoEm && agora - j.interrompidoEm < VALE_INTERRUPCAO) || (!!j.paradaEm && agora - j.paradaEm < 10_000);
+    if (!interrompeu) j.interrompidoEm = 0;
+    const tela = j.tela.texto(40);
+    const caixa = caixaDeEntrada(tela);
+    // sem a caixa à vista pode ser um diálogo: depois de um Esc vale se não houver pergunta na tela
+    if (trabalhandoNaTela(tela) || (caixa === null && (!interrompeu || lerPergunta(tela)))) { j.paradoDesde = 0; return; }
+    if (!j.paradoDesde) { j.paradoDesde = agora; return; }
+    const espera = interrompeu ? PARADO_INTERROMPIDO : PARADO_SEM_GANCHO;
+    if (agora - j.paradoDesde < espera || (!interrompeu && agora - (j.ganchoEm || 0) < espera)) return;
+    j.interrompidoEm = 0;
+    j.paradoDesde = 0;
+    j.paradaEm = interrompeu ? agora : 0;
+    // interrompido logo no começo, o Claude devolve o pedido para a caixa dele: o colar limpa antes da próxima
+    j.limparCaixa = interrompeu;
+    j.restoNaCaixa = caixa || '';
+    this.cerebro.registrarEvento(id, 'Interrompido', null, interrompeu ? 'interrompido' : 'parou sem avisar o fim do turno');
+    if (!interrompeu) require('./config').registrar(`${this.cerebro.sessao(id)?.nome || id}: parado na tela há ${Math.round(espera / 1000)} s sem gancho; passa a esperando você`);
+    this.mudarEstado(id, j, 'esperando você', 'Interrompido');
+  }
 
   /** Antes do gancho de início, o agente pode estar parado numa pergunta do próprio CLI. */
   verificarPergunta(id, j) {
@@ -838,7 +902,7 @@ class Janelas {
       let cuidando = false; // a pergunta de confiança numa pasta do próprio Engram: ele mesmo responde
       try { cuidando = j.provedor === 'claude' && this.confiarPastaDoEngram(id, j); } catch { /* segue como pergunta normal */ }
       if (!cuidando) {
-        if (a.ganchos) { this.verificarPergunta(id, j); this.conferirEntrega(id, j); } else this.estadoPelaTela(id, j, a);
+        if (a.ganchos) { this.verificarPergunta(id, j); this.conferirEntrega(id, j); this.conferirParada(id, j); } else this.estadoPelaTela(id, j, a);
         try { this.olharPergunta(id, j, a); } catch { /* tela estranha: fica para a próxima volta */ }
       }
       if (!j.conversa) j.conversa = this.acharConversa(id, j);
@@ -1618,9 +1682,22 @@ class Janelas {
 
   colar(j) {
     if (!j.viva || !j.caixa.length || !LIVRE.has(j.estado)) { j.entregando = false; return; }
+    if (j.limparCaixa) {
+      // o pedido interrompido voltou para a caixa do Claude: colar agora grudaria a mensagem nova nele. Ctrl+C
+      // limpa a caixa; um só, e só se o que está nela for esse pedido (o texto visto na parada, o começo da
+      // última mensagem colada ou a etiqueta de colagem) — com a caixa vazia, dois Ctrl+C fecham o Claude
+      j.limparCaixa = false;
+      const agora = caixaDeEntrada(j.tela.texto(40));
+      if (agora && (/^\[Pasted text #\d+/i.test(agora) || comecoDe(agora, j.restoNaCaixa) || comecoDe(agora, j.ultimaColada))) {
+        j.escrever('\x03');
+        setTimeout(() => this.colar(j), 700);
+        return;
+      }
+    }
     const [n, de, naFila, tentativas = 0] = j.caixa.shift();
     const texto = tentativas ? naFila : naFila + this.avisoDeCerebro(j.id); // na recolocação o aviso já está no texto
     j.escrever(COLAR_INICIO + texto.replace(/\r\n/g, '\n') + COLAR_FIM);
+    j.ultimaColada = texto;
     j.estado = 'pensando'; // até o gancho confirmar, ninguém mais cola por cima
     j.teveTurno = true;
     const a = this.provedores.adaptador(j.provedor) || {};
@@ -1655,6 +1732,10 @@ class Janelas {
     if (dados.externo) this.registrarExterno(id, dados.externo);
     if (evento === 'Stop') { j.teveTurno = true; j.ocupadoAte = 0; }
     else if (['UserPromptSubmit', 'PreToolUse', 'PostToolUse'].includes(evento)) j.ocupadoAte = Date.now() + 30_000;
+    j.ganchoEm = Date.now();
+    // o UserPromptSubmit do pedido interrompido pode chegar depois do Esc: não apaga a interrupção (ela vence
+    // sozinha, e o colar só limpa a caixa se o texto nela for o do pedido interrompido)
+    if (evento === 'SessionStart') { j.interrompidoEm = 0; j.paradaEm = 0; j.limparCaixa = false; }
     const ferramenta = dados.ferramenta || null;
     const entrada = dados.entrada && typeof dados.entrada === 'object' ? dados.entrada : {};
     // arquivo com segredo que a pessoa preencheu (pedir_segredo): o gancho do Claude Code barra a ferramenta
@@ -1908,6 +1989,16 @@ function assunto(texto, max = 160) {
 function pastaDoPedido(tela) {
   const m = /Adding a new directory:\s*([\s\S]*?)\s*This session hasn/i.exec(String(tela || ''));
   return m ? m[1].split('\n').map(l => l.trim()).join('') : null;
+}
+
+/**
+ * O texto da caixa de entrada do Claude é o começo de `ref`? (compara sem as quebras e os recuos que o terminal
+ * põe; a caixa pode mostrar só o começo de um texto longo)
+ */
+function comecoDe(caixa, ref) {
+  const n = t => String(t || '').replace(/\s+/g, ' ').trim();
+  const c = n(caixa).slice(0, 80);
+  return c.length >= 4 && n(ref).startsWith(c);
 }
 
 /** Caminho para comparar: sem espaço de quebra, com \, sem barra no fim, minúsculo e com ~ trocado pela pasta do usuário. */

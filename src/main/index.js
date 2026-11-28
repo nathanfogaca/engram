@@ -38,6 +38,7 @@ const { Tarefas } = require('./tarefas');
 const { Diario } = require('./diario');
 const { Cenas } = require('./cenas');
 const { Uso } = require('./uso');
+const { Celular } = require('./celular');
 
 const TELA = path.resolve(__dirname, '..', 'tela');
 const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.json': 'application/json', '.wasm': 'application/wasm', '.woff': 'font/woff', '.otf': 'font/otf' };
@@ -58,8 +59,11 @@ let janela = null;
 let nucleo = null;
 let nucleoPromessa = null;
 
+// quem mais ouve os avisos ao vivo além das janelas (o app do celular, no modo dispatch)
+const ouvintesAvisos = new Set();
 function avisar(msg) {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('aovivo', msg);
+  for (const f of ouvintesAvisos) { try { f(msg); } catch { /* um ouvinte com erro não para os outros */ } }
 }
 
 // Aviso do Windows (das automações). Guardados até sumirem: sem referência, o clique pode se perder.
@@ -163,6 +167,11 @@ async function iniciarNucleo() {
     config.registrar(`servidor local na porta ${cfg.porta}: ${e.message}`);
   }
   try { await janelas.iniciar(); } catch (e) { config.registrar(`motor: ${e.message}`); setTimeout(() => janelas.motorCaiu(), 100); }
+  // modo dispatch: o app do Engram no celular, pela rede local (só abre a porta se a pessoa ligou)
+  const celular = new Celular({ cfg, dados: c.dados, janelas, cerebro, versao: app.getVersion(), salvarConfig: config.salvar, registrar: config.registrar, avisar });
+  ouvintesAvisos.add(m => celular.aoAvisar(m));
+  app.on('before-quit', () => celular.parar());
+  if (cfg.celular_ligado) celular.ligar().catch(e => config.registrar(`celular: ${e.message}`));
 
   sincronizar();
   setInterval(() => sincronizar(), Math.max(1, cfg.cerebro.sincronizar_min) * 60_000);
@@ -188,7 +197,7 @@ async function iniciarNucleo() {
     try { janela.setTitleBarOverlay({ color: t.fundo, symbolColor: t.simbolos, height: 40 }); } catch { /* sem barra */ }
   };
   definirTema(cfg.tema);
-  const rotas = criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, abrirTrabalho: sessao => abrirJanelaTrabalho(sessao, trabalho) });
+  const rotas = criarRotas({ cfg, cerebro, trocaCerebro, tarefas, cenas, janelas, provedores, mcps, skills, escolherArquivo, definirTema, sincronizar, estadoSinc, versao: app.getVersion(), caminhos: c, salvarConfig: config.salvar, reiniciar, atualizador, codigo, fluxos, extensoes, previa, linguagens, trabalho, automacoes, celular, abrirTrabalho: sessao => abrirJanelaTrabalho(sessao, trabalho) });
   return { cfg, janelas, rotas, extensoes, arquivos: new Arquivos(c.arquivos) };
 }
 

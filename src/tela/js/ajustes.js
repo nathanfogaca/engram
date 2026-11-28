@@ -5,6 +5,7 @@
 import { $, $$, el, api, avisar } from "./util.js";
 import { COR_AGENTE } from "./contas.js";
 import { PainelGeral, PainelAparencia } from "./geral.js";
+import { PainelCelular } from "./painel-celular.js";
 
 const NOMES_AGENTE = { claude: "Claude Code", codex: "Codex", antigravity: "Antigravity", gemini: "Antigravity", opencode: "OpenCode" };
 const md = () => window.markdownit({ html: false, linkify: true }).disable("image");
@@ -34,6 +35,7 @@ export class Ajustes {
     this.skills = new PainelSkills($("#aba-skills"));
     this.geral = new PainelGeral($("#aba-geral"), { aoReiniciar: () => api("/api/reiniciar", { method: "POST" }) });
     this.aparencia = new PainelAparencia($("#aba-aparencia"));
+    this.celular = new PainelCelular($("#aba-celular"));
   }
 
   async abrir(aba = this.aba) {
@@ -51,6 +53,7 @@ export class Ajustes {
       contas: ["Contas e agentes", "Entre com as suas contas para usar cada agente no palco. Chaves de API ficam no cofre do Windows, nunca em texto no disco."],
       mcps: ["Servidores MCP", "As ferramentas que os agentes usam (bancos, sistemas, APIs). Cadastre uma vez, teste e escolha para quais agentes vale."],
       skills: ["Skills", "Receitas que ensinam o agente a fazer uma tarefa do seu jeito (formato SKILL.md). Valem para janelas novas."],
+      celular: ["Celular", "O app do Engram no celular: mande pedidos ao maestro e acompanhe o time de longe, pelo mesmo Wi-Fi."],
     };
     $("#ajustes-titulo").textContent = titulos[aba][0];
     $("#ajustes-sub").textContent = titulos[aba][1];
@@ -58,6 +61,7 @@ export class Ajustes {
     else if (aba === "geral") await this.geral.carregar();
     else if (aba === "aparencia") this.aparencia.carregar();
     else if (aba === "mcps") await this.mcps.carregar();
+    else if (aba === "celular") await this.celular.carregar();
     else await this.skills.carregar();
   }
 }
