@@ -39,7 +39,9 @@ const CHAVE_ABA = "engram.celular.aba";
 const CHAVE_VISTO = "engram.celular.entregas-vistas";
 const OCUPADO = new Set(["pensando", "trabalhando", "iniciando"]);
 const ATENCAO = "precisa de você";
-const COR_MODELO = { opus: "#f5c451", sonnet: "#38d6f5", haiku: "#8ef06a", fable: "#e879f9", gpt: "#7ee0c3", codex: "#7ee0c3", antigravity: "#6aa8ff", gemini: "#6aa8ff", opencode: "#fbbf24" };
+// a mesma tabela do palco do PC (util.js); a ordem importa: "carbon" antes de "gemini"
+const COR_MODELO = { opus: "#f5c451", sonnet: "#38d6f5", haiku: "#8ef06a", fable: "#e879f9", gpt: "#7ee0c3", codex: "#7ee0c3", carbon: "#6aa8ff", argon: "#8fb2ff", hydrogen: "#38d6f5", flash: "#4ade9f", orchestrator: "#f5c451", antigravity: "#6aa8ff", gemini: "#6aa8ff", opencode: "#fbbf24" };
+const CHAVE_MODO = "engram.celular.modo-palco";
 const guardado = {
   ler(k) { try { return localStorage.getItem(k); } catch { return null; } },
   gravar(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* sem armazenamento */ } },
@@ -349,20 +351,124 @@ function desenharPalco() {
     type: "button", class: n === palcoVisto ? "on" : "",
     onclick: () => { palcoVisto = n; desenharPalco(); },
   }, time.palcos.find(p => p.n === n)?.nome || `Palco ${n}`, el("em", { text: String(time.agentes.filter(a => a.palco === n).length) }))));
-  desenharMapa();
+  const ags = time.agentes.filter(a => a.palco === palcoVisto);
+  // a pessoa escolheu? vale a escolha. Senão: mapa para time pequeno, grupos para time grande
+  modoPalco = guardado.ler(CHAVE_MODO) || (ags.length > 8 ? "grupos" : "mapa");
+  for (const b of document.querySelectorAll("#palco-modo button")) b.classList.toggle("on", b.dataset.modo === modoPalco);
+  fios = new Map();
+  nosMapa = new Map();
+  grupoDe = new Map();
+  noTopo = new Set();
+  $("#mapa").classList.toggle("em-grupos", modoPalco === "grupos");
+  if (!ags.length) $("#mapa").replaceChildren(el("p", { class: "vazio", text: "Nenhum agente aberto neste palco." }));
+  else if (modoPalco === "grupos") desenharGrupos(ags);
+  else desenharMapa(ags);
   desenharLista();
 }
 
 const TAMANHO = [700, 470];
+let modoPalco = "mapa";
+let grupoDe = new Map();  // id do agente -> id do grupo (visão Grupos), para o pulso descer pela linha certa
+let noTopo = new Set();   // quem fica no alto da visão Grupos (os maestros)
 
-function desenharMapa() {
+/** O setor de um agente: o centro do cartão dele dentro da área do setor (a mesma regra do palco do PC). */
+function setorDe(a, setores) {
+  const p = a.posicao;
+  if (!p) return null;
+  const cx = p.x + (p.w || TAMANHO[0]) / 2, cy = p.y + (p.h || TAMANHO[1]) / 2;
+  return setores.find(s => cx >= s.x && cx <= s.x + s.w && cy >= s.y && cy <= s.y + s.h) || null;
+}
+
+/** Visão Grupos: o maestro no alto e cada setor num cartão, com uma linha de luz descendo até cada um. */
+function desenharGrupos(ags) {
   const caixa = $("#mapa");
-  const ags = time.agentes.filter(a => a.palco === palcoVisto);
-  fios = new Map();
-  nosMapa = new Map();
-  if (!ags.length) { caixa.replaceChildren(el("p", { class: "vazio", text: "Nenhum agente aberto neste palco." })); return; }
+  const setores = time.setores.filter(s => s.palco === palcoVisto);
+  const topo = ags.filter(a => a.papel === "maestro");
+  const grupos = setores.map(s => ({ s, membros: [] }));
+  const soltos = [];
+  for (const a of ags.filter(x => x.papel !== "maestro")) {
+    const s = setorDe(a, setores);
+    const g = s && grupos.find(x => x.s.id === s.id);
+    (g ? g.membros : soltos).push(a);
+  }
+  const lista = grupos.filter(g => g.membros.length);
+  if (soltos.length) lista.push({ s: { id: "_soltos", nome: setores.length ? "Sem setor" : "Time", cor: "#8b7bff" }, membros: soltos });
+  const ordem = a => (OCUPADO.has(a.estado) ? 0 : a.estado === ATENCAO ? 0 : 1);
+  const raiz = el("div", { class: "grupos" });
+  const fiosSvg = sv("svg", { class: "grupos-fios", "aria-hidden": "true" });
+  raiz.append(fiosSvg);
+  const cab = el("div", { class: "grupos-topo" });
+  if (topo.length) for (const a of topo) {
+    const b = el("button", { type: "button", class: `topo-membro${a.id === alvo ? " atual" : ""}`, "data-estado": classeEstado(a.estado), style: { "--cor": corModelo(a) }, onclick: () => selecionar(a.id) },
+      rosto(a, 58, "grande"),
+      el("span", { class: "topo-texto" }, el("b", { text: a.nome }), el("small", { text: OCUPADO.has(a.estado) ? (acaoLegivel(a.acao) || textoEstado(a.estado)) : subtitulo(a) })),
+      el("span", { class: "alvo-estado", text: textoEstado(a.estado) }));
+    cab.append(b);
+    nosMapa.set(a.id, b);
+    noTopo.add(a.id);
+  } else cab.append(el("div", { class: "topo-palco" }, el("span", { class: "topo-ponto" }), el("b", { text: time.palcos.find(p => p.n === palcoVisto)?.nome || `Palco ${palcoVisto}` })));
+  raiz.append(cab);
+  let i = 0;
+  for (const g of lista) {
+    const cor = /^#[0-9a-f]{6}$/i.test(g.s.cor) ? g.s.cor : "#8b7bff";
+    const ocupados = g.membros.filter(a => OCUPADO.has(a.estado)).length;
+    const atencao = g.membros.filter(a => a.estado === ATENCAO).length;
+    const membros = [...g.membros].sort((x, y) => ordem(x) - ordem(y) || x.nome.localeCompare(y.nome));
+    const cartao = el("section", { class: `grupo${ocupados ? " em-acao" : ""}`, "data-grupo": g.s.id, style: { "--c": cor, "--i": String(i++) } },
+      el("header", {}, el("b", { text: g.s.nome }), el("em", { text: String(g.membros.length) }),
+        atencao ? el("small", { class: "grupo-atencao" }, el("i"), `${atencao} precisa${atencao > 1 ? "m" : ""} de você`)
+          : ocupados ? el("small", { class: "grupo-ocupados" }, el("i"), `${ocupados} trabalhando`) : null),
+      el("div", { class: "grupo-membros" }, ...membros.map(a => {
+        const b = el("button", { type: "button", class: `mini-membro${a.id === alvo ? " atual" : ""}`, "data-estado": classeEstado(a.estado), style: { "--cor": corModelo(a) }, onclick: () => selecionar(a.id), "aria-label": `${a.nome}, ${textoEstado(a.estado)}` },
+          rosto(a, 46), el("span", { class: "mini-nome", text: a.nome }),
+          a.fila?.length ? el("em", { class: "mini-fila", text: String(a.fila.length) }) : null);
+        nosMapa.set(a.id, b);
+        grupoDe.set(a.id, g.s.id);
+        return b;
+      })));
+    raiz.append(cartao);
+  }
+  caixa.replaceChildren(raiz);
+  requestAnimationFrame(() => fiosDosGrupos(raiz, fiosSvg));
+}
+
+/** As linhas da visão Grupos: um tronco que desce do maestro e um galho para cada setor. */
+function fiosDosGrupos(raiz, svg) {
+  if (!raiz.isConnected) return;
+  const W = raiz.clientWidth, H = raiz.scrollHeight;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
+  svg.replaceChildren();
+  const base = raiz.getBoundingClientRect();
+  const origem = raiz.querySelector(".grupos-topo .av, .topo-ponto");
+  const o = origem.getBoundingClientRect();
+  const X = o.left + o.width / 2 - base.left;
+  const Y0 = o.bottom - base.top + 4;
+  const corTopo = getComputedStyle(origem).getPropertyValue("--cor").trim() || "rgb(139,123,255)";
+  const defs = sv("defs");
+  svg.append(defs, sv("g", { id: "pulsos" }));
+  for (const c of raiz.querySelectorAll(".grupo")) {
+    const r = c.getBoundingClientRect();
+    const y = r.top - base.top + 22, x = r.left - base.left;
+    const cor = c.style.getPropertyValue("--c") || "#8b7bff";
+    const gid = `gr-${c.dataset.grupo}`;
+    defs.append(sv("linearGradient", { id: gid, gradientUnits: "userSpaceOnUse", x1: X, y1: Y0, x2: x, y2: y },
+      sv("stop", { offset: 0, "stop-color": corTopo }), sv("stop", { offset: 1, "stop-color": cor })));
+    const d = `M${X} ${Y0} L${X} ${y - 16} Q${X} ${y} ${X + 16} ${y} L${x} ${y}`;
+    const fio = sv("path", { d, class: "fio", stroke: `url(#${gid})` });
+    svg.insertBefore(fio, svg.lastChild);
+    svg.insertBefore(sv("path", { d, class: `fio-fluxo${c.classList.contains("em-acao") ? " ativo" : ""}`, stroke: `url(#${gid})` }), svg.lastChild);
+    svg.insertBefore(sv("circle", { cx: x, cy: y, r: 3.5, fill: cor, class: "fio-ponta" }), svg.lastChild);
+    fios.set(`grupo:${c.dataset.grupo}`, fio);
+  }
+}
+
+function desenharMapa(ags) {
+  const caixa = $("#mapa");
+  const muitos = ags.length > 8;
   const W = Math.max(280, caixa.clientWidth || 340);
-  const H = Math.round(Math.max(300, Math.min(W * 1.05, innerHeight * 0.55)));
+  const H = Math.round(Math.max(300, Math.min(W * (muitos ? 1.3 : 1.05), innerHeight * (muitos ? 0.72 : 0.55))));
   // onde cada cartão está no palco do PC (o centro dele); quem não tem lugar vai para uma fileira embaixo
   const pts = ags.map((a, i) => {
     const p = a.posicao;
@@ -384,7 +490,7 @@ function desenharMapa() {
   const offX = pad + ((W - 2 * pad) - bw * esc) / 2, offY = pad - 6 + ((H - 2 * pad - 20) - bh * esc) / 2;
   for (const p of pts) { p.X = offX + (p.x - x0) * esc; p.Y = offY + (p.y - y0) * esc; }
   // afasta quem ficou em cima do outro (o mapa é pequeno; o palco do PC é grande)
-  const MIN = 96;
+  const MIN = muitos ? 82 : 96;
   for (let volta = 0; volta < 90; volta++) {
     for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
       const a = pts[i], b = pts[j];
@@ -443,14 +549,16 @@ function desenharMapa() {
   for (const p of pts) {
     const a = p.a;
     const maestro = a.papel === "maestro";
-    const t = maestro ? 60 : 50;
+    const t = muitos ? (maestro ? 48 : 38) : (maestro ? 60 : 50);
     const g = sv("g", { class: `no${a.id === alvo ? " atual" : ""}${maestro ? " maestro" : ""}`, "data-estado": classeEstado(a.estado), transform: `translate(${p.X.toFixed(1)} ${p.Y.toFixed(1)})`, style: { "--cor": corModelo(a) }, tabindex: 0, role: "button", "aria-label": `${a.nome}, ${textoEstado(a.estado)}` });
     g.append(sv("circle", { class: "halo", r: t / 2 + 9 }), sv("circle", { class: "anel", r: t / 2 + 4 }));
     const rostoSvg = avatar({ semente: a.id, cor: corModelo(a), papel: a.papel, tamanho: t });
     rostoSvg.setAttribute("x", -t / 2); rostoSvg.setAttribute("y", -t / 2);
     g.append(rostoSvg);
-    g.append(Object.assign(sv("text", { class: "no-nome", y: t / 2 + 18 }), { textContent: a.nome.length > 16 ? `${a.nome.slice(0, 15)}…` : a.nome }));
-    g.append(Object.assign(sv("text", { class: "no-sub", y: t / 2 + 31 }), { textContent: OCUPADO.has(a.estado) ? textoEstado(a.estado) : a.estado === ATENCAO ? "precisa de você" : (a.nome_modelo || a.papel_nome || "") }));
+    const corte = muitos ? 11 : 16;
+    g.append(Object.assign(sv("text", { class: "no-nome", y: t / 2 + 16 }), { textContent: a.nome.length > corte ? `${a.nome.slice(0, corte - 1)}…` : a.nome }));
+    // com muita gente, só o nome (o estado já está no anel; o resto, na lista embaixo)
+    if (!muitos) g.append(Object.assign(sv("text", { class: "no-sub", y: t / 2 + 29 }), { textContent: OCUPADO.has(a.estado) ? textoEstado(a.estado) : a.estado === ATENCAO ? "precisa de você" : (a.nome_modelo || a.papel_nome || "") }));
     if (a.fila?.length) g.append(sv("circle", { class: "no-fila", cx: t / 2 - 2, cy: -t / 2 + 2, r: 8 }), Object.assign(sv("text", { class: "no-fila-n", x: t / 2 - 2, y: -t / 2 + 6 }), { textContent: String(a.fila.length) }));
     g.addEventListener("click", () => selecionar(a.id));
     g.addEventListener("keydown", e => { if (e.key === "Enter") selecionar(a.id); });
@@ -464,10 +572,17 @@ function desenharMapa() {
 function pulsar(de, para) {
   const alvoNo = nosMapa.get(para);
   if (!alvoNo) return;
-  const caminho = fios.get(`${de}|${para}`) || fios.get(`${para}|${de}`);
-  const acender = () => { alvoNo.classList.remove("recebeu"); void alvoNo.getBBox(); alvoNo.classList.add("recebeu"); setTimeout(() => alvoNo.classList.remove("recebeu"), 1300); };
+  let caminho, invertido;
+  if (modoPalco === "grupos") {
+    // nos grupos a linha vai do maestro ao setor: desce se o maestro mandou, sobe se mandaram a ele
+    if (noTopo.has(de) && grupoDe.has(para)) { caminho = fios.get(`grupo:${grupoDe.get(para)}`); invertido = false; }
+    else if (noTopo.has(para) && grupoDe.has(de)) { caminho = fios.get(`grupo:${grupoDe.get(de)}`); invertido = true; }
+  } else {
+    caminho = fios.get(`${de}|${para}`) || fios.get(`${para}|${de}`);
+    invertido = !fios.get(`${de}|${para}`);
+  }
+  const acender = () => { alvoNo.classList.remove("recebeu"); void alvoNo.getBoundingClientRect(); alvoNo.classList.add("recebeu"); setTimeout(() => alvoNo.classList.remove("recebeu"), 1300); };
   if (!caminho || matchMedia("(prefers-reduced-motion: reduce)").matches) { acender(); return; }
-  const invertido = !fios.get(`${de}|${para}`);
   const total = caminho.getTotalLength();
   const cor = corModelo(agente(de));
   const bola = sv("circle", { r: 4.5, class: "pulso", fill: cor });
@@ -960,6 +1075,7 @@ $("#texto").addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey && (toqueFino || e.ctrlKey || e.metaKey)) { e.preventDefault(); enviar(); }
 });
 for (const b of document.querySelectorAll("#abas button")) b.addEventListener("click", () => mostrarAba(b.dataset.aba));
+for (const b of document.querySelectorAll("#palco-modo button")) b.addEventListener("click", () => { guardado.gravar(CHAVE_MODO, b.dataset.modo); desenharPalco(); });
 $("#alvo").addEventListener("click", () => mostrarAba("palco"));
 $("#novas").addEventListener("click", () => rolarFim());
 $("#visor-voltar").addEventListener("click", () => fecharVisor());

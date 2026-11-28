@@ -65,7 +65,13 @@
   </section>
 
   <section class="vista rola" id="v-palco" hidden>
-    <div class="palco-abas" id="palco-abas"></div>
+    <div class="palco-cab">
+      <div class="palco-abas" id="palco-abas"></div>
+      <div class="palco-modo" id="palco-modo" role="tablist" aria-label="Como ver o palco">
+        <button type="button" data-modo="grupos">Grupos</button>
+        <button type="button" data-modo="mapa">Mapa</button>
+      </div>
+    </div>
     <div class="mapa" id="mapa"></div>
     <h2 class="secao">Time <small id="time-resumo"></small></h2>
     <div class="time-lista" id="time-lista"></div>
